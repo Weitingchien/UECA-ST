@@ -1,0 +1,15 @@
+MyDataset.__getitem__: dataloader 需要第index筆資料時，呼叫此函式
+
+NLP_Dataset = {x: MyDataset(edict[x], test=(x == 'test'), tokenizer=tokenizer) for x in ['train', 'test']}:
+    建立NLP_Dataset字典(有兩個鍵值對):
+        'train': 對應的值是一個MyDataset物件，此物件讀取了訓練資料
+        'test': 對應的值是一個MyDataset物件，此物件讀取了測試資料
+    edict[x]: {"train": train_file_path, "test": test_file_path}，當x是'train'時，edict[x]得到訓練檔案的路徑
+        當x是'train'時，'train' == 'test'，為False，傳入test的值就是False
+    後續可直接NLP_Dataset['train']以及NLP_Dataset['test']取用
+
+
+trainloader = DataLoader(NLP_Dataset['train'], batch_size=opt.batch_size, shuffle=True, drop_last=True):
+    批次大小為8
+    批次數量: 每8筆資料為一個批次，1750/8 = 218餘6
+    drop_last=True會直接丟棄剩下的6筆資料，總共會有218個批次

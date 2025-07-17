@@ -1,0 +1,44 @@
+1.訓練:
+    python UECA_CE.py --savecheckpoint True --save_path prompt_ECPE/ 
+        指定fold的數量:
+        python UECA_CE.py --savecheckpoint True --start_fold 1 --end_fold 3 --save_path prompt_ECPE/
+
+    few_shot:
+    python UECA_CE_few_shot.py --savecheckpoint True --save_path prompt_ECPE_few_shot/
+
+2.訓練完的模型在'prompt_ECPE'資料夾->得到預測結果的文字檔
+    python UECA_CE.py --test_only True --checkpoint True --checkpointpath prompt_ECPE/ --batch_size 8 --dataset split10/
+
+    few_shot(從原本的split10/fold{i}_train.json不重覆取樣10%的樣本當作少數樣本，如第4.):
+    python UECA_CE_few_shot.py --test_only True --checkpoint True --checkpointpath prompt_ECPE_few_shot/ --batch_size 8 --dataset split10_few_shot/
+
+
+3.將文字檔存在資料夾'UECA-CE'->得到評估數值
+    python eval_UECA_CE.py --gt_dir split10/ --pred_dir UECA-CE/
+    few_shot:
+    python eval_UECA_CE_few_shot.py --gt_dir split10_few_shot/ --pred_dir UECA-CE_few_shot/
+
+
+
+
+
+
+
+
+
+
+4. few_shot生成結果:
+(ueca) ting@DESKTOP-26GRK1T:/mnt/d/GithubRepo/UECA$ python prepare_fewshot_data.py
+將從 'split10/' 創建 10.0% 的 few-shot 資料集，並儲存至 'split10_few_shot/'
+已生成: fold1_train_10_percent.json，包含 175 / 1750 筆資料
+已生成: fold2_train_10_percent.json，包含 174 / 1748 筆資料
+已生成: fold3_train_10_percent.json，包含 175 / 1753 筆資料
+已生成: fold4_train_10_percent.json，包含 175 / 1756 筆資料
+已生成: fold5_train_10_percent.json，包含 175 / 1750 筆資料
+已生成: fold6_train_10_percent.json，包含 175 / 1759 筆資料
+已生成: fold7_train_10_percent.json，包含 175 / 1754 筆資料
+已生成: fold8_train_10_percent.json，包含 174 / 1744 筆資料
+已生成: fold9_train_10_percent.json，包含 175 / 1754 筆資料
+已生成: fold10_train_10_percent.json，包含 173 / 1737 筆資料
+
+Few-shot 資料集創建完成！
