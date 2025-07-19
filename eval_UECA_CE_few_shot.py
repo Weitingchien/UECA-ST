@@ -207,7 +207,7 @@ def main():
     parser.add_argument("--fold", type=int, default=None)
     args = parser.parse_args()
 
-    folds = [args.fold] if args.fold is not None else list(range(1, 4))
+    folds = [args.fold] if args.fold is not None else list(range(1, 11))
 
     for fold in folds:
         gt_file = os.path.join(args.gt_dir, f"fold{fold}_test.json")

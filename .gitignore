@@ -2,3 +2,9 @@ bert-base-chinese/
 prompt_ECPE/
 prompt_ECPE_few_shot/
 backup/
+init_supervised_metrics/
+prompt_ECPE_few_shot_ST/
+pseudo_results/
+UECA-CE_few_shot/
+split10_few_shot_ST/
+./test.py

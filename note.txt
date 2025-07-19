@@ -13,3 +13,220 @@ trainloader = DataLoader(NLP_Dataset['train'], batch_size=opt.batch_size, shuffl
     批次大小為8
     批次數量: 每8筆資料為一個批次，1750/8 = 218餘6
     drop_last=True會直接丟棄剩下的6筆資料，總共會有218個批次
+
+
+
+
+
+(UECA_CE):
+
+
+print("mask_label[0]:", mask_label[0])
+mask_label[0]: tensor([-100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, 7478, 7478, 3187, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, 7478, 7478, 3187, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, 7478, 7478, 3187, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, 7478, 7478, 3187, -100, -100,
+        -100, -100, -100, -100, -100, -100, 7478, 7478, 3187, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, 7478, 7478, 3187, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, 7478,
+        7478, 3187, -100, -100, -100, -100, -100, -100, -100, -100, -100, 7478,
+        7478, 3187, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, 7478, 7478, 3187, -100, -100, -100, -100, 7478, 7478, 3187,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, 7478,
+        7478, 3187, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, 3221, 3221, 8110,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        7478, 7478, 3187, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        7478, 7478, 3187, -100, -100, -100, -100, 7478, 7478, 3187, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, 7478, 7478, 3187, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, 7478, 7478, 3187, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, 7478, 7478, 3187, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100], device='cuda:0')
+
+
+print("mask_label[0] decoded:", tokenizer.decode(mask_label[0].cpu().tolist()))
+mask_label[0] decoded: [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 
+[UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非
+ 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] 
+[UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 是 是 12 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 
+[UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK]  
+非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 
+[UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 
+[UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK]
+
+
+print("label[0]:", label[0])
+label[0]: tensor([-100, -100, -100, -100, -100, -100, -100, -100, 7478, 7478, 3187, -100,
+        -100, -100, -100, -100, -100, 7478, 7478, 3187, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, 7478, 7478, 3187, -100,
+        -100, -100, -100, -100, -100, -100, -100, 7478, 7478, 3187, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, 7478, 7478, 3187, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, 3221, 7478, 3187, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, 7478, 3221,  127, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, 7478, 7478, 3187, -100, -100, -100, -100,
+        -100, -100, -100, 7478, 7478, 3187, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, 7478, 7478, 3187, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, 7478, 7478, 3187, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, 7478, 7478, 3187, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, 7478, 7478, 3187, -100,
+        -100, -100, -100, -100, -100, -100, 7478, 7478, 3187, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, 7478, 7478, 3187, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, 7478, 7478, 3187,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, 7478, 7478,
+        3187, -100, -100, -100, -100, -100, -100, 7478, 7478, 3187, -100, -100,
+        -100, -100, -100, -100, -100, -100, 7478, 7478, 3187, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100,
+        -100, -100, -100, -100, -100, -100, -100, -100], device='cuda:0')
+    
+
+
+print("label[0] decoded:", tokenizer.decode(label[0].cpu().tolist()))
+label[0] decoded: [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 是 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 是 6 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非  
+非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 非 非 无 [UNK] [UNK] [UNK] 
+[UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] 
+[UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK] [UNK]
+
+
+
+
+
+
+
+
+
+偽標籤樣本與有標籤樣本範例(UECA_CE_few_shot_ST.py):
+
+first_sample_unlabeled = unlabeled_dataset[0]
+print("第1筆偽標籤樣本 shape:", first_sample_unlabeled.shape)
+print("第1筆偽標籤樣本內容:", first_sample_unlabeled)
+print("第1筆偽標籤樣本 decoded:", tokenizer.decode(first_sample_unlabeled.tolist()))
+
+第1筆偽標籤樣本 shape: (512,)
+第1筆偽標籤樣本內容: [ 101  122 2190  754 6387 1914 4263 1962 1075 4318 4638  782 3341 6432
+  103  103  103  102  123 1963 3362 4263 4305 4960 4197  679 4761 2792
+ 5303  103  103  103  102  124 6929 1377 4638 4802 3221  816  839 2552
+  752 1036  103  103  103  102  125 6821  679 2157  857 7270 3217 2356
+ 3308 7345 3441 3215 2126 5709 1736 2207 1277 4638 4374 1920 2023  103
+  103  103  102  126 3297 6818 2218 1762 1139 7305 6892 2482 1036 4638
+ 3198  952  679 2207 2552  696  749  671 1372 5632 2346 1075  749  128
+ 2399 4638 1061 1520 4305  103  103  103  102  127 5632 2802 4263 4305
+ 1469 5632 2346 6624 3141  103  103  103  102  128 4374 1920 2023  912
+ 1728 2590 2573 4263 4305 5445 2193 5636 7770 6117 1327 4567 1908 1355
+  103  103  103  102  129 6820  857 6822  749 1278 7368  103  103  103
+  102  102    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0    0    0    0    0    0    0
+    0    0    0    0    0    0    0    0]
+
+第1筆偽標籤樣本 decoded: [CLS] 1 对 于 许 多 爱 好 养 狗 的 人 来 说 [MASK] [MASK] [MASK] [SEP] 2 如 果 爱 犬 突 然 不 知 所 终 [MASK] [MASK] [MASK] [SEP] 3 那 可  
+的 确 是 件 伤 心 事 儿 [MASK] [MASK] [MASK] [SEP] 4 这 不 家 住 长 春 市 朝 阳 桥 星 宇 花 园 小 区 的 王 大 娘 [MASK] [MASK] [MASK] [SEP] 5 最 近 就 在 出 门 遛  
+弯 儿 的 时 候 不 小 心 丢 了 一 只 自 己 养 了 7 年 的 八 哥 犬 [MASK] [MASK] [MASK] [SEP] 6 自 打 爱 犬 和 自 己 走 散 [MASK] [MASK] [MASK] [SEP] 7 王 大 娘 便 因
+ 思 念 爱 犬 而 导 致 高 血 压 病 复 发 [MASK] [MASK] [MASK] [SEP] 8 还 住 进 了 医 院 [MASK] [MASK] [MASK] [SEP] [SEP] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] 
+[PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] 
+[PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] 
+[PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] 
+[PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD]
+
+
+
+
+
+first_sample_labeled = NLP_Dataset['train'][0]
+print("第1筆有標籤樣本 (train):")
+print("  回傳的是一個 list, 包含 7 個元素:")
+print(f"  x_bert shape: {first_sample_labeled[0].shape}")
+print(f"  y_bert shape: {first_sample_labeled[1].shape}")
+print(f"  label shape: {first_sample_labeled[2].shape}")
+print(f"  mask_label shape: {first_sample_labeled[3].shape}")
+print(f"  gt_emotion: {first_sample_labeled[4]}")
+print(f"  gt_cause: {first_sample_labeled[5]}")
+print(f"  gt_pair: {first_sample_labeled[6]}")
+print(f"\n  x_bert decoded: {tokenizer.decode(first_sample_labeled[0].tolist())}")
+
+第1筆有標籤樣本 (train):
+  回傳的是一個 list, 包含 7 個元素:
+  x_bert shape: (512,)
+  y_bert shape: (512,)
+  label shape: (512,)
+  mask_label shape: (512,)
+  gt_emotion: 1
+  gt_cause: 1
+  gt_pair: 1
+
+  x_bert decoded: [CLS] 1 7 月 6 日 凌 晨 [MASK] [MASK] [MASK] [SEP] 2 几 个 不 明 身 份 的 人 强 行 撬 开 门 后 [MASK] [MASK] [MASK] [SEP] 3 将 他 和 妻 子 用 胶  
+带 绑 住 手 脚 [MASK] [MASK] [MASK] [SEP] 4 塞 进 汽 车 后 备 箱 [MASK] [MASK] [MASK] [SEP] 5 拉 到 四 皓 镇 一 个 叫 白 沟 的 地 方 [MASK] [MASK] [MASK] [SEP] 6 扔
+ 在 路 边 后 扬 长 而 去 [MASK] [MASK] [MASK] [SEP] 7 说 起 当 时 的 情 形 [MASK] [MASK] [MASK] [SEP] 8 冯 书 民 仍 心 有 余 悸 [MASK] [MASK] [MASK] [SEP] 9 因 为  
+手 脚 都 被 捆 绑 着 [MASK] [MASK] [MASK] [SEP] 10 嘴 也 被 用 胶 带 封 住 了 [MASK] [MASK] [MASK] [SEP] 11 他 们 也 没 办 法 呼 救 [MASK] [MASK] [MASK] [SEP] 12 那
+ 些 人 把 他 们 扔 到 路 边 后 [MASK] [MASK] [MASK] [SEP] 13 还 对 他 们 进 行 了 搜 身 [MASK] [MASK] [MASK] [SEP] 14 摔 坏 了 他 随 身 携 带 的 一 部 手 机 [MASK] 
+[MASK] [MASK] [SEP] 15 等 这 些 人 走 后 [MASK] [MASK] [MASK] [SEP] 16 他 们 才 挣 脱 胶 带 跑 到 附 近 的 村 民 家 里 求 救 [MASK] [MASK] [MASK] [SEP] [SEP] [PAD] 
+[PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] 
+[PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] 
+[PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] 
+[PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD]

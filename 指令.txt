@@ -6,6 +6,11 @@
     few_shot:
     python UECA_CE_few_shot.py --savecheckpoint True --save_path prompt_ECPE_few_shot/
 
+    few_shot_ST:
+    python UECA_CE_few_shot_ST.py --savecheckpoint True --save_path prompt_ECPE_few_shot_ST --training_iter 1
+
+
+
 2.訓練完的模型在'prompt_ECPE'資料夾->得到預測結果的文字檔
     python UECA_CE.py --test_only True --checkpoint True --checkpointpath prompt_ECPE/ --batch_size 8 --dataset split10/
 
@@ -13,9 +18,11 @@
     python UECA_CE_few_shot.py --test_only True --checkpoint True --checkpointpath prompt_ECPE_few_shot/ --batch_size 8 --dataset split10_few_shot/
 
 
+
+
 3.將文字檔存在資料夾'UECA-CE'->得到評估數值
     python eval_UECA_CE.py --gt_dir split10/ --pred_dir UECA-CE/
-    few_shot:
+    few_shot(將文字檔存在資料夾'UECA-CE_few_shot'->得到評估數值):
     python eval_UECA_CE_few_shot.py --gt_dir split10_few_shot/ --pred_dir UECA-CE_few_shot/
 
 

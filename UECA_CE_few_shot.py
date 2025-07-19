@@ -369,7 +369,7 @@ def run():
         testloader = DataLoader(NLP_Dataset['test'], batch_size=opt.batch_size, shuffle=False)
         
         num_test_data = len(NLP_Dataset['test'])
-        print(f"--- 訓練資料集 (NLP_Dataset['train']) 總共有: {num_test_data} 筆資料") # 195筆資料
+        print(f"--- 測試資料集 (NLP_Dataset['train']) 總共有: {num_test_data} 筆資料") # 195筆資料
         
         
         max_p_emotion, max_r_emotion, max_f1_emotion, max_p_cause, max_r_cause, max_f1_cause, max_p_pair,\
