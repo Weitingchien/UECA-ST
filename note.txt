@@ -15,6 +15,62 @@ trainloader = DataLoader(NLP_Dataset['train'], batch_size=opt.batch_size, shuffl
     drop_last=True會直接丟棄剩下的6筆資料，總共會有218個批次
 
 
+資料夾切分指令:
+(ueca) ting@DESKTOP-26GRK1T:/mnt/d/GithubRepo/UECA$ python split_few_shot_and_unlabeled.py
+Fold 1: 總計 1750 筆資料  
+  - 訓練集: 175 筆 (10.0%)
+  - 驗證集: 175 筆 (10.0%)
+  - 未標籤集: 1400 筆 (80.0%)
+Fold 2: 總計 1748 筆資料  
+  - 訓練集: 174 筆 (10.0%)
+  - 驗證集: 174 筆 (10.0%)
+  - 未標籤集: 1400 筆 (80.1%)
+Fold 3: 總計 1753 筆資料  
+  - 訓練集: 175 筆 (10.0%)
+  - 驗證集: 175 筆 (10.0%)
+  - 未標籤集: 1403 筆 (80.0%)
+Fold 4: 總計 1756 筆資料
+  - 訓練集: 175 筆 (10.0%)
+  - 驗證集: 175 筆 (10.0%)
+  - 未標籤集: 1406 筆 (80.1%)
+Fold 5: 總計 1750 筆資料
+  - 訓練集: 175 筆 (10.0%)
+  - 驗證集: 175 筆 (10.0%)
+  - 未標籤集: 1400 筆 (80.0%)
+Fold 6: 總計 1759 筆資料
+  - 訓練集: 175 筆 (9.9%)
+  - 驗證集: 175 筆 (9.9%)
+  - 未標籤集: 1409 筆 (80.1%)
+Fold 7: 總計 1754 筆資料
+  - 訓練集: 175 筆 (10.0%)
+  - 驗證集: 175 筆 (10.0%)
+  - 未標籤集: 1404 筆 (80.0%)
+Fold 8: 總計 1744 筆資料
+  - 訓練集: 174 筆 (10.0%)
+  - 驗證集: 174 筆 (10.0%)
+  - 未標籤集: 1396 筆 (80.0%)
+Fold 9: 總計 1754 筆資料
+  - 訓練集: 175 筆 (10.0%)
+  - 驗證集: 175 筆 (10.0%)
+  - 未標籤集: 1404 筆 (80.0%)
+Fold 10: 總計 1737 筆資料
+  - 訓練集: 173 筆 (10.0%)
+  - 驗證集: 173 筆 (10.0%)
+  - 未標籤集: 1391 筆 (80.1%)
+切分完成，所有檔案已輸出到 split10_few_shot_st_with_val
+每個fold包含:
+  - fold{}_train_few_shot.json: 訓練集 (10%)
+  - fold{}_val.json: 驗證集 (10%)
+  - fold{}_unlabeled.json: 未標籤集 (80%)
+  - fold{}_test.json: 測試集 (從原始檔案複製)
+
+
+
+
+
+
+
+
 
 
 
@@ -230,3 +286,85 @@ print(f"\n  x_bert decoded: {tokenizer.decode(first_sample_labeled[0].tolist())}
 [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] 
 [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] 
 [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD] [PAD]
+
+
+
+
+
+檢查偽標籤與有標籤樣本的格式有沒有一致
+
+
+=== pseudo_dataset 第一筆樣本 ===
+樣本數量: 66
+樣本長度: 8
+pseudo[0]: type=ndarray, shape=(512,), dtype=int64
+pseudo[1]: type=ndarray, shape=(512,), dtype=int64
+pseudo[2]: type=ndarray, shape=(512,), dtype=int64
+pseudo[3]: type=ndarray, shape=(512,), dtype=int64
+pseudo[4]: type=int64, shape=(), dtype=int64
+pseudo[5]: type=int64, shape=(), dtype=int64
+pseudo[6]: type=int64, shape=(), dtype=int64
+pseudo[7]: type=bool, value=False
+
+=== 內容詳細檢查 ===
+🔍 labeled樣本的x_bert (前50個token):
+[ 101  122  128 3299  127 3189 1119 3247  103  103  103  102  123 1126
+  702  679 3209 6716  819 4638  782 2487 6121 3063 2458 7305 1400  103
+  103  103  102  124 2199  800 1469 1988 2094 4500 5540 2372 5308  857
+ 2797 5558  103  103  103  102  125 1853]
+解碼為文字: [CLS] 1 7 月 6 日 凌 晨 [MASK] [MASK] [MASK] [SEP] 2 几 个 不 明 身 份 的 人 强 行  
+撬 开 门 后 [MASK] [MASK] [MASK] [SEP] 3 将 他 和 妻 子 用 胶 带 绑 住 手 脚 [MASK] [MASK] [MASK] [SEP] 4 塞
+
+🔍 pseudo樣本的x_bert (前50個token):
+[ 101  122  800 4917  103  103  103  102  123 2110 1278 4638 3457 2682
+ 6206 2141 4385  749  103  103  103  102  124 2769 5507 2137 6206 2214
+ 6407  103  103  103  102  125 2190  754 3911 5825  924 4638 1104 2137
+  103  103  103  102  126 2157  782 6006]
+解碼為文字: [CLS] 1 他 称 [MASK] [MASK] [MASK] [SEP] 2 学 医 的 梦 想 要 实 现 了 [MASK] [MASK] 
+[MASK] [SEP] 3 我 肯 定 要 尝 试 [MASK] [MASK] [MASK] [SEP] 4 对 于 淦 菊 保 的 决 定 [MASK] [MASK] [MASK] [SEP] 5 家 人 虽
+
+🔍 [MASK] token 位置檢查:
+labeled樣本 [MASK] 位置 (前10個): [ 8  9 10 27 28 29 44 45 46 56]
+pseudo樣本 [MASK] 位置 (前10個): [ 4  5  6 18 19 20 29 30 31 42]
+
+🔍 label 和 mask_label 檢查:
+labeled樣本 label (非-100的位置):
+  位置: [ 8  9 10 27 28 29 44 45 46 56]
+  值: [7478 7478 3187 7478 7478 3187 7478 7478 3187 7478]
+  解碼: ['非', '非', '无', '非', '非', '无', '非', '非', '无', '非']
+
+pseudo樣本 label (非-100的位置):
+  位置: [ 4  5  6 18 19 20 29 30 31 42]
+  值: [7478 7478 3187 7478 7478 3187 7478 7478 3187 7478]
+  解碼: ['非', '非', '无', '非', '非', '无', '非', '非', '无', '非']
+
+=== 格式一致性檢查 ===
+✅ 所有格式檢查通過！
+
+=== 檢查 is_labeled 標記 ===
+labeled樣本的is_labeled: True
+pseudo樣本的is_labeled: False
+
+=== pseudo-labeling 詳細資訊 ===
+本輪收集到的pseudo樣本數: 66
+第一個pseudo樣本的doc_id: 2099
+第一個pseudo樣本的pseudo_labels: [7478 7478 3187 7478 7478 3187 7478 7478 3187 7478 7478 3187 7478 7478
+ 3187 7478 7478 3187 7478 7478 3187 7478 7478 3187 7478 7478 3187 7478
+ 7478 3187 7478 7478 3187 7478 7478 3187 7478 7478 3187 7478 7478 3187
+ 7478 7478 3187]
+pseudo_labels長度: 45
+pseudo_labels解碼: ['非', '非', '无', '非', '非', '无', '非', '非', '无', '非', '非', '无', '非', '非', '无', '非', '非', '无', '非', '非', '无', '非', '非', '无', '非', '非', '无', '非', '非', '无', '非', '非', '无', '非', '非', '无', '非', '非', '无', '非', '非', '无', '非', '非', '无']
+
+==================================================
+資料格式與內容檢查完成 - 設置斷點
+==================================================
+
+
+
+資料集:
+
+1. 複合情緒: doc_id: 1401 clause 16: '股民要么兴奋要么悲伤' (emotion: happiness&sadness)
+
+2. 3個pairs: "pairs": [10,9], [16,15], [16,15]
+
+3. 2個pairs但基本上另一個pair是一樣的: "doc_id": "1235"、"pairs": [3,2], [3,2]

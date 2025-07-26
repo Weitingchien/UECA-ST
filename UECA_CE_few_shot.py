@@ -354,7 +354,7 @@ def run():
         if use_gpu:
             model = model.cuda()
 
-        train_file_name = 'fold{}_train_10_percent.json'.format(fold)
+        train_file_name = 'fold{}_train_few_shot.json'.format(fold)
         test_file_name = 'fold{}_test.json'.format(fold)
         print('############# fold {} begin ###############'.format(fold))
         train = opt.dataset + train_file_name

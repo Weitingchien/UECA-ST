@@ -3,12 +3,23 @@
         指定fold的數量:
         python UECA_CE.py --savecheckpoint True --start_fold 1 --end_fold 3 --save_path prompt_ECPE/
 
-    few_shot:
+    few_shot(3折):
     python UECA_CE_few_shot.py --savecheckpoint True --save_path prompt_ECPE_few_shot/
 
     few_shot_ST:
-    python UECA_CE_few_shot_ST.py --savecheckpoint True --save_path prompt_ECPE_few_shot_ST --training_iter 1
+    python UECA_CE_few_shot_ST.py --savecheckpoint True --save_path prompt_ECPE_few_shot_ST --training_iter 100 --start_fold=1 --end_fold=10
 
+
+    few_shot_ST(跳過初始有標籤數據集訓練，直接開始self-training對未標記樣本作預測):
+    python UECA_CE_few_shot_ST.py --skip_initial_training=True --start_fold=1 --end_fold=1 --training_iter 3 --savecheckpoint True --save_path prompt_ECPE_few_shot_ST
+
+    few_shot_ST(3折):
+    python UECA_CE_few_shot_ST.py --start_fold=1 --end_fold=5 --training_iter 60 --savecheckpoint True --save_path prompt_ECPE_few_shot_ST 
+
+    few_shot_ST(使用驗證集):
+    TIMESTAMP=$(date +%Y_%m_%d_%H_%M_%S)
+    python UECA_CE_few_shot_ST.py --start_fold=1 --end_fold=1 --training_iter 60 --savecheckpoint True --save_path prompt_ECPE_few_shot_ST_$TIMESTAMP --dataset split10_few_shot_st_with_val/
+    python UECA_CE_few_shot_ST.py --start_fold=1 --end_fold=1 --training_iter 60 --savecheckpoint True --save_path prompt_ECPE_few_shot_ST --dataset split10_few_shot_st_with_val/ 
 
 
 2.訓練完的模型在'prompt_ECPE'資料夾->得到預測結果的文字檔
@@ -17,14 +28,28 @@
     few_shot(從原本的split10/fold{i}_train.json不重覆取樣10%的樣本當作少數樣本，如第4.):
     python UECA_CE_few_shot.py --test_only True --checkpoint True --checkpointpath prompt_ECPE_few_shot/ --batch_size 8 --dataset split10_few_shot/
 
+    few_shot_ST:
+    python UECA_CE_few_shot_ST.py --test_only True --start_fold=1 --end_fold=5 --checkpoint True --checkpointpath prompt_ECPE_few_shot_ST/ --batch_size 8 --dataset split10_few_shot_ST/
+
+    few_shot_ST(使用驗證集版本):
+    python UECA_CE_few_shot_ST.py --test_only True --start_fold=1 --end_fold=5 --checkpoint True --checkpointpath prompt_ECPE_few_shot_ST/ --batch_size 8 --dataset split10_few_shot_st_with_val/
 
 
 
 3.將文字檔存在資料夾'UECA-CE'->得到評估數值
     python eval_UECA_CE.py --gt_dir split10/ --pred_dir UECA-CE/
+
     few_shot(將文字檔存在資料夾'UECA-CE_few_shot'->得到評估數值):
     python eval_UECA_CE_few_shot.py --gt_dir split10_few_shot/ --pred_dir UECA-CE_few_shot/
 
+    few_shot_ST(將文字檔存在資料夾'UECA-CE_few_shot_ST'->得到評估數值):
+    python eval_UECA_CE_few_shot_st.py --gt_dir split10_few_shot_ST/ --pred_dir UECA-CE_few_shot_ST/
+
+
+
+
+4. 計算i折整體平均(few_shot_ST):
+python calculate_fold_averages.py --file prompt_ECPE_few_shot_ST/test_results.txt --output average_results.txt --output_dir prompt_ECPE_few_shot_ST/ --std
 
 
 
@@ -34,7 +59,8 @@
 
 
 
-4. few_shot生成結果:
+
+5. few_shot生成結果:
 (ueca) ting@DESKTOP-26GRK1T:/mnt/d/GithubRepo/UECA$ python prepare_fewshot_data.py
 將從 'split10/' 創建 10.0% 的 few-shot 資料集，並儲存至 'split10_few_shot/'
 已生成: fold1_train_10_percent.json，包含 175 / 1750 筆資料

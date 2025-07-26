@@ -8,3 +8,8 @@ pseudo_results/
 UECA-CE_few_shot/
 split10_few_shot_ST/
 ./test.py
+debug/
+split10_few_shot_st_with_val/
+split10_few_shot/
+pseudo_prediction_analysis.txt
+evaluation_results.txt
