@@ -1,1 +1,0 @@
-python UECA_CE_few_shot_ST.py --test_only True --checkpoint True --checkpointpath prompt_ECPE_few_shot_ST/ --batch_size 8 --dataset split10_few_shot_ST/

@@ -7,7 +7,7 @@ from transformers import BertTokenizer, BertForMaskedLM
 import time
 import numpy as np
 import json
-from transformers.generation.configuration_utils import CompileConfig
+# from transformers.generation.configuration_utils import CompileConfig
 
 
 """setting agrparse"""
@@ -35,9 +35,16 @@ parser.add_argument('--savecheckpoint', type=bool, default=True, help='save chec
 parser.add_argument('--save_path', type=str, default='prompt_ECPE', help='path to save checkpoint')
 parser.add_argument('--device', type=str, default='0', help='device id')
 parser.add_argument('--dataset', type=str, default='split10/', help='path for dataset')
+parser.add_argument('--start_fold', type=int, default=1)
+parser.add_argument('--end_fold',   type=int, default=10)
 
 opt = parser.parse_args()
 os.environ["CUDA_VISIBLE_DEVICES"] = opt.device
+
+print(f"\n=== Dataset Configuration ===")
+print(f"Using dataset: {opt.dataset}")
+print(f"Save path: {opt.save_path}")
+print(f"=====================================\n")
 
 if opt.usegpu and torch.cuda.is_available():
     use_gpu = True
@@ -339,7 +346,7 @@ def run():
     max_result_emo_f, max_result_emo_p, max_result_emo_r = [], [], []
     max_result_pair_f, max_result_pair_p, max_result_pair_r = [], [], []
     max_result_cause_f, max_result_cause_p, max_result_cause_r = [], [], []
-    for fold in range(1, 11):
+    for fold in range(opt.start_fold, opt.end_fold + 1):
         # model
         print('build model..')
         model = prompt_bert(bert_path)
@@ -353,8 +360,8 @@ def run():
         train_file_name = 'fold{}_train.json'.format(fold)
         test_file_name = 'fold{}_test.json'.format(fold)
         print('############# fold {} begin ###############'.format(fold))
-        train = opt.dataset + train_file_name
-        test = opt.dataset + test_file_name
+        train = opt.dataset.rstrip('/') + '/' + train_file_name
+        test = opt.dataset.rstrip('/') + '/' + test_file_name
         edict = {"train": train, "test": test}
         NLP_Dataset = {x: MyDataset(edict[x], test=(x == 'test'), tokenizer=tokenizer) for x in ['train', 'test']}
         trainloader = DataLoader(NLP_Dataset['train'], batch_size=opt.batch_size, shuffle=True, drop_last=True)
@@ -394,10 +401,11 @@ def run():
                     all_test_pair_gt = torch.cat((all_test_pair_gt, gt_pair), 0)
 
 
+                evaluation_file = os.path.join(opt.save_path, 'evaluation_results.txt')
                 p_emotion, r_emotion, f_emotion, p_cause, r_cause, f_cause, p_pair, r_pair, f_pair = crf_prompt(
                     all_test_logits, all_test_label, all_test_x_bert, all_test_emotion_gt, all_test_cause_gt,
-                    all_test_pair_gt, save_path="evaluation_results.txt")
-                save_mask_predictions(all_test_logits, all_test_x_bert, tokenizer, NLP_Dataset['test'].doc_id, fold=fold)
+                    all_test_pair_gt, save_path=evaluation_file)
+                save_mask_predictions(all_test_logits, all_test_x_bert, tokenizer, NLP_Dataset['test'].doc_id, fold=fold, output_dir=opt.save_path)
                 print(
                     "e_p: {:.4f} e_r: {:.4f} e_f: {:.4f} c_p: {:.4f} c_r: {:.4f} c_f: {:.4f}"
                     " pair_p: {:.4f} pair_r: {:.4f} pair_f: {:.4f}".format(
