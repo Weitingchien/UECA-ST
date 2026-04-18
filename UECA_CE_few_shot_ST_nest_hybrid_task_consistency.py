@@ -74,33 +74,97 @@ def _build_pair_candidate_ids(clause_index, window_size, pair_label_index, no_pa
 
 
 def generate_pseudo_label_tokens(logits, input_ids, mask_token_id, yes_token_id, window_size, tokenizer, threshold=None):
-    """根據模型 logits 與原始輸入，為每個 [MASK] 預測偽標籤序列"""
+    """根據模型 logits 與原始輸入，為每個 [MASK] 位置產生偽標籤序列
+
+    這個函式假設模板結構為「每句固定 3 個 [MASK]」，順序如下: 
+    1) 情緒MASK 
+    2) 原因MASK 
+    3) 情緒原因組合MASK 
+
+    核心規則:
+    - 情緒/原因MASK :直接取該位置機率最大的 token 作為預測
+    - 情緒原因組合MASK:
+      - 若該句被預測為「原因句」，只在視窗內候選句編號 + 「无」中做 argmax
+      - 若不是原因句，情緒原因MASK一律填「无」
+    - 若提供 threshold，且情緒/原因任一MASK最大機率低於 threshold，立即回傳 None
+       (代表這筆樣本信心不足，不納入偽標籤)
+
+    參數：
+    - logits: shape = (seq_len, vocab_size) 的機率或分數陣列 (通常已 softmax)
+    - input_ids: shape = (seq_len,) 的輸入 token ids
+    - mask_token_id: [MASK] 的 token id (通常 103)
+    - yes_token_id: 「是」的 token id (來判斷原因句)
+    - window_size: 組合候選句的視窗大小
+    - tokenizer: 用於查詢「无」token id
+    - threshold: 可選; 若設定，會對情緒/原因MASK做最低信心檢查
+
+    回傳:
+    - np.array(dtype=np.int64): 依 [MASK] 出現順序排列的偽標籤 token 序列
+    - None: 當啟用 threshold 且信心不足時
+    """
+    # 找出序列中所有 [MASK] 的絕對位置 (例如 [10, 15, 20, ...])
     mask_positions = np.where(input_ids == mask_token_id)[0]
+
+    # 用來存最後輸出的偽標籤 (順序必須對齊 mask_positions)
     pseudo_tokens = []
+
+    # 記錄每個子句是否被判定為「原因句」: {clause_idx: True/False}
+    # clause_idx 採 1-based (第 1 句、第 2 句...)
     cause_flags = {}
+
+    # 「无」代表無配對 (no pair) 的 token id
     no_pair_token_id = tokenizer.convert_tokens_to_ids('无')
+
+    # 句子編號 1~75 對應的 token id 清單 (用於 pair 槽位)
     pair_label_index = get_label_index()
+
+    # 逐一處理每個 [MASK]
     for idx, pos in enumerate(mask_positions):
+        # 依據每句 3 個 [MASK] 的模板：0=情緒, 1=原因, 2=情緒原因組合
         slot_type = idx % 3
+
+        # 取出該 [MASK] 位置對整個詞彙表的機率分佈
         token_probs = logits[pos]
+
+        # ===== 情緒MASK / 原因MASK =====
         if slot_type in (0, 1):
+            # 直接取最大機率的 token id
             pred_index = int(np.argmax(token_probs))
             max_prob = float(token_probs[pred_index])
+
+            # 若啟用信心閾值，且最大機率低於門檻，整筆樣本捨棄
             if threshold is not None and max_prob < threshold:
                 return None
+
+            # 寫入該MASK偽標籤
             pseudo_tokens.append(pred_index)
+
+            # 若是「原因MASK」，順便記錄該句是否為原因句
+            # idx//3 + 1 可把 mask 索引映射到第幾句
             if slot_type == 1:
                 clause_idx = idx // 3 + 1
                 cause_flags[clause_idx] = (pred_index == yes_token_id)
+
+        # ===== 情緒原因組合MASK =====
         else:
             clause_idx = idx // 3 + 1
+
+            # 只有被判為原因句，才需要找對應的情緒子句是第幾句
             if cause_flags.get(clause_idx, False):
+                # 建立候選集合: 視窗內句編號 token + 「无」
                 candidate_ids = _build_pair_candidate_ids(clause_idx, window_size, pair_label_index, no_pair_token_id)
+
+                # 只取候選集合上的機率，避免預測到不合法句編號
                 candidate_probs = token_probs[candidate_ids]
+
+                # 在候選集合中選最大機率對應的 token id
                 selected = int(candidate_ids[int(np.argmax(candidate_probs))])
                 pseudo_tokens.append(selected)
             else:
+                # 非原因句一律無配對
                 pseudo_tokens.append(no_pair_token_id)
+
+    # 最後回傳固定 int64 格式，方便後續資料集與比較邏輯使用
     return np.array(pseudo_tokens, dtype=np.int64)
 
 
@@ -974,6 +1038,159 @@ def compute_clause_embeddings(hidden_states, input_ids, probs, mode, tokenizer, 
     return torch.stack(embeddings)
 
 
+def predict_pseudo_with_single_model(single_model, x_np, use_gpu, tokenizer, window_size):
+    """使用單一模型對單一未標註樣本產生 pseudo tokens
+
+    流程摘要: 
+    1) 把單筆 numpy 輸入轉成 batch=1 的 tensor
+    2) 用模型做前向推論取得 logits
+    3) 將 logits 轉為機率分佈 (softmax)
+    4) 呼叫既有的偽標籤生成函式，輸出 [MASK] 位置對應的 pseudo token 序列
+
+    參數: 
+    - single_model: 用來做推論的單一模型 (emo/cause/pair 任一)
+    - x_np: 單筆文件的 input_ids (numpy array)
+    - use_gpu: 是否使用 GPU
+    - tokenizer: 目前模型對應 tokenizer (提供 mask token id 與 token id 工具)
+    - window_size: pair 預測時可配對的句子視窗大小
+
+    回傳: 
+    - pseudo_tokens: numpy array，表示此模型對該文件的偽標籤 token 序列
+    """
+    # 將單筆 numpy 輸入轉成 PyTorch LongTensor，並加上 batch 維度
+    # 原本 shape 例： (512,) -> (1, 512)
+    x_tensor = torch.tensor(x_np, dtype=torch.long).unsqueeze(0)
+
+    # 若啟用 GPU，將輸入搬到 CUDA，避免與模型裝置不一致
+    if use_gpu:
+        x_tensor = x_tensor.cuda()
+
+    # 前向推論: labels=None 表示純推論，不計算監督損失
+    # 回傳通常是 (loss, logits)，此處只需要 logits
+    _, single_logits = single_model(x_tensor, labels=None)
+
+    # 將 logits 轉為機率分佈，方便後續依機率挑選 pseudo label
+    # shape 維持 (1, seq_len, vocab_size)
+    single_logits = F.softmax(single_logits, dim=-1)
+
+    # 取出 batch 中唯一一筆（索引 0），切斷梯度並轉成 CPU numpy
+    # 後續的 generate_pseudo_label_tokens 以 numpy 邏輯處理
+    logits_np = single_logits[0].detach().cpu().numpy()
+
+    # 取得二元標記中「是」對應的 token id
+    # 目前函式只用 yes_token_id; 第二個回傳值 (no_token_id) 此處不使用
+    yes_token_id, _ = get_binary_token_ids(tokenizer)
+
+    # 依據模型機率與規則產生偽標籤序列: 
+    # - input_ids: 原始輸入 (含 [MASK])
+    # - mask_token_id: 指定哪些位置要被填入 pseudo token
+    # - window_size: 限制 pair 可選範圍
+    # - threshold=None: 此處不做信心閾值截斷 (由外層策略決定要不要過濾)
+    pseudo_tokens = generate_pseudo_label_tokens(
+        logits=logits_np,
+        input_ids=np.array(x_np, dtype=np.int64),
+        mask_token_id=tokenizer.mask_token_id,
+        yes_token_id=yes_token_id,
+        window_size=window_size,
+        tokenizer=tokenizer,
+        threshold=None,
+    )
+
+    # 回傳該模型對此樣本的最終 pseudo token 序列
+    return pseudo_tokens
+
+
+def apply_task_consistency_filter(
+    x_np,
+    default_pseudo_tokens,
+    consistency_enabled,
+    consistency_models,
+    consistency_stats,
+    use_gpu,
+    tokenizer,
+    window_size,
+    doc_id=None,
+    consistency_debug_records=None,
+):
+    """一致性過濾: 三模型 pseudo tokens 必須完全一致才通過
+
+    參數說明: 
+    - x_np: 單筆未標註樣本的 input_ids (numpy array)
+    - default_pseudo_tokens: 主模型 (目前訓練中的模型) 已經產生好的偽標籤
+    - consistency_enabled: 本輪是否啟用一致性過濾
+    - consistency_models: 一致性用三模型 (emo_model, cause_model, pair_model)
+    - consistency_stats: 統計字典，包含 checked/accept/reject/skip_unavailable
+    - use_gpu/tokenizer/window_size: 推論與偽標籤解碼所需設定
+
+    回傳: 
+    - (True, pseudo_tokens): 通過一致性，且回傳可用偽標籤
+    - (False, None): 未通過一致性，呼叫端應丟棄該樣本
+    """
+    # 情況 1: 若本輪未啟用一致性，直接沿用主模型輸出的偽標籤
+    # 這代表「不做額外過濾」，讓資料照原本邏輯進入訓練
+    if not consistency_enabled:
+        return True, default_pseudo_tokens
+
+    # 情況 2: 理論上要做一致性，但三模型不可用 (例如路徑缺檔)
+    # 這裡直接拒絕該樣本，並把 skip_unavailable 計數 +1
+    if consistency_models is None:
+        consistency_stats["skip_unavailable"] += 1
+        return False, None
+
+    # 到這裡代表: 一致性啟用且三模型可用，正式進行一次一致性檢查
+    consistency_stats["checked"] += 1
+
+    # 取出三個任務最佳模型: 情緒、原因、配對
+    emo_model, cause_model, pair_model = consistency_models
+
+    # 讓三個模型分別對同一筆 x_np 產生完整 pseudo token 序列
+    # 注意：這裡比較的是「整個序列」是否一致，而不是只看單一位置
+    emo_pseudo = predict_pseudo_with_single_model(emo_model, x_np, use_gpu, tokenizer, window_size)
+    cause_pseudo = predict_pseudo_with_single_model(cause_model, x_np, use_gpu, tokenizer, window_size)
+    pair_pseudo = predict_pseudo_with_single_model(pair_model, x_np, use_gpu, tokenizer, window_size)
+
+    # 規則: 三份 pseudo token 必須「完全相同」才視為一致
+    # np.array_equal 會同時檢查 shape 與每個位置的值
+    all_equal = np.array_equal(emo_pseudo, cause_pseudo) and np.array_equal(cause_pseudo, pair_pseudo)
+
+    # 產生可讀版解碼結果 (便於離線檢查)
+    # - *_tokens: token
+    # - *_decoded: 將 token 序列轉回字串
+    emo_tokens = tokenizer.convert_ids_to_tokens(emo_pseudo.tolist())
+    cause_tokens = tokenizer.convert_ids_to_tokens(cause_pseudo.tolist())
+    pair_tokens = tokenizer.convert_ids_to_tokens(pair_pseudo.tolist())
+
+    emo_decoded = tokenizer.convert_tokens_to_string(emo_tokens)
+    cause_decoded = tokenizer.convert_tokens_to_string(cause_tokens)
+    pair_decoded = tokenizer.convert_tokens_to_string(pair_tokens)
+
+    # 若使用者啟用詳細記錄，保存三模型各自預測與一致性結果 (供離線分析)
+    if consistency_debug_records is not None:
+        consistency_debug_records.append({
+            "doc_id": doc_id,
+            "all_equal": bool(all_equal),
+            "emo_pseudo_ids": emo_pseudo.tolist(),
+            "emo_pseudo_tokens": emo_tokens,
+            "emo_pseudo_decoded": emo_decoded,
+            "cause_pseudo_ids": cause_pseudo.tolist(),
+            "cause_pseudo_tokens": cause_tokens,
+            "cause_pseudo_decoded": cause_decoded,
+            "pair_pseudo_ids": pair_pseudo.tolist(),
+            "pair_pseudo_tokens": pair_tokens,
+            "pair_pseudo_decoded": pair_decoded,
+        })
+
+    if all_equal:
+        # 通過一致性: accept 計數 +1，並回傳任一份 pseudo (此處回 emo_pseudo)
+        # 因為三者已確認相同，所以回傳哪一份都等價
+        consistency_stats["accept"] += 1
+        return True, emo_pseudo
+
+    # 未通過一致性: reject 計數 +1，回傳 (False, None) 讓外層丟棄該樣本
+    consistency_stats["reject"] += 1
+    return False, None
+
+
 """setting agrparse"""
 parser = argparse.ArgumentParser(description='Training')
 
@@ -1019,11 +1236,30 @@ parser.add_argument('--gamma', type=float, default=0.5, help='偽標籤 loss 的
 parser.add_argument('--self_training_rounds', type=int, default=10,help='number of self-training rounds')
 parser.add_argument('--st_training_epochs', type=int, default=3, help='number of epochs to train in each self-training round')
 parser.add_argument('--test_model_type', type=str, default='initial', choices=['initial', 'self_training'], 
-                    help='which model to test: initial (fold{i}.pth) or self_training (self_training_models/fold{i}_self_training_best.pth)')
+                    help='which model to test: initial (fold{i}_best_pair.pth) or self_training (self_training_models/fold{i}_self_training_best_pair.pth)')
 parser.add_argument('--log_pseudo_quality', action='store_true',
                     help='compare pseudo labels against ground truth when available and persist error statistics')
-parser.add_argument('--pseudo_selector', type=str, default='threshold', choices=['threshold', 'nest', 'random'],
-                    help='偽標籤選擇策略: 使用信心度閥值、NeST 選擇器或隨機選擇')
+parser.add_argument('--pseudo_selector', type=str, default='threshold', choices=['threshold', 'nest', 'random', 'hybrid'],
+                    help='偽標籤選擇策略: 使用信心度閥值、NeST 選擇器、隨機選擇或混合模式(Hybrid)')
+parser.add_argument('--consistency_pseudo', action='store_true',
+                    help='啟用 task consistency 偽標籤篩選: 多模型預測一致才納入訓練')
+parser.add_argument('--consistency_require_all_equal', action='store_true',
+                    help='一致性規則: 要求所有模型預測完全一致 (預設啟用)')
+parser.add_argument('--consistency_model_source', type=str, default='self_training_best',
+                    choices=['supervised_best', 'self_training_best'],
+                    help='一致性篩選時使用的模型來源')
+parser.add_argument('--save_consistency_predictions', action='store_true',
+                    help='儲存 task consistency 三模型各自預測結果 (每輪一個 JSON)')
+parser.add_argument('--save_val_predictions', action='store_true',
+                    help='是否將驗證集預測結果另存為 text_result 格式檔案')
+parser.add_argument('--no_save_val_predictions', action='store_false', dest='save_val_predictions',
+                    help='停用驗證集預測結果輸出')
+parser.add_argument('--hybrid_switch_round', type=int, default=5,
+                    help='Hybrid 模式下，切換選擇器的輪次分界點')
+parser.add_argument('--hybrid_reverse', action='store_true',
+                    help='反轉 Hybrid 策略順序: 前期使用 NeST，後期切換為 Threshold (預設為 False: 前期 Threshold 後期 NeST)')
+parser.add_argument('--hybrid_alternating', action='store_true',
+                    help='交替 Hybrid 策略：奇數輪使用 Threshold，偶數輪使用 NeST (預設為 False)')
 parser.add_argument('--nest_k', type=int, default=5,
                     help='NeST 選擇器使用的鄰域數量 (KNN k 值)')
 parser.add_argument('--nest_beta', type=float, default=0.1,
@@ -1039,14 +1275,20 @@ parser.add_argument('--knn_embedding_mode', type=str, default='cls',
                     help='KNN 使用的 embedding 類型: cls=傳統[CLS], emotion_clause=情緒子句聚合, cause_clause=原因子句聚合, emotion_clause_mask=情緒子句+[MASK]_e平均, cause_clause_mask=原因子句+[MASK]_c平均')
 parser.add_argument('--self_training_eps', type=float, default=0.6,
                     help='NeST 選擇器中的距離穩定項 (保留舊參數以相容既有腳本)')
-parser.add_argument('--nest_loss_mode', type=str, default='standard',
+parser.add_argument('--nest_loss_mode', type=str, default='nest',
                     choices=['standard', 'nest'],
                     help='NeST loss 計算模式: standard=所有偽標籤都計入, nest=只有信心>γ才計入')
 parser.add_argument('--nest_loss_threshold', type=float, default=0.9,
                     help='nest 模式下的信心閾值 (對應論文的 γ，預設 0.9)')
 
+parser.set_defaults(save_val_predictions=True)
+
 opt = parser.parse_args()
 os.environ["CUDA_VISIBLE_DEVICES"] = opt.device
+
+# 若啟用 consistency_pseudo 且未明確提供 all-equal 規則，預設啟用嚴格一致
+if opt.consistency_pseudo and not opt.consistency_require_all_equal:
+    opt.consistency_require_all_equal = True
 
 # 設置隨機種子以確保實驗可重現性
 # 必須在任何模型初始化和數據載入之前設定
@@ -1062,9 +1304,25 @@ if opt.save_path == 'prompt_ECPE_few_shot_ST' and not opt.test_only:
     
     # 生成參數化的 save_path
     retain_pseudo_str = "retain_pseudo" if opt.retain_pseudo_in_unlabeled else "remove_pseudo"
+    consistency_str = "consistency" if opt.consistency_pseudo else ""
     
     # 根據偽標籤選擇策略決定顯示的模式
-    if opt.pseudo_selector == 'nest':
+    if opt.pseudo_selector == 'hybrid':
+        if opt.hybrid_alternating:
+            selector_str = "hybrid_alt"
+        else:
+            rev_str = "rev_" if opt.hybrid_reverse else ""
+            selector_str = f"hybrid_{rev_str}switch{opt.hybrid_switch_round}"
+        # Hybrid 模式下，NeST 參數也需要記錄
+        knn_emb_str = f"_knn{opt.knn_embedding_mode}" if opt.knn_embedding_mode != 'cls' else ""
+        nest_str = f"_nest_k{opt.nest_k}_{opt.nest_divergence_mode}{knn_emb_str}"
+        selector_str += nest_str
+        
+        # 混合模式初期使用 threshold，後期使用 nest multiplier
+        threshold_str = f"th{opt.threshold}_"
+        nest_multiplier_str = f"_nestmul{opt.nest_multiplier:g}".replace(".", "p")
+        nest_params_str = f"_nbeta{opt.nest_beta}_nm{opt.nest_m}"
+    elif opt.pseudo_selector == 'nest':
         # 加入 knn_embedding_mode 以區分不同 embedding 模式 (cls, emotion_clause, cause_clause)
         knn_emb_str = f"_knn{opt.knn_embedding_mode}" if opt.knn_embedding_mode != 'cls' else ""
         selector_str = f"nest_k{opt.nest_k}_{opt.nest_divergence_mode}{knn_emb_str}"
@@ -1132,6 +1390,7 @@ if opt.save_path == 'prompt_ECPE_few_shot_ST' and not opt.test_only:
     folder_components.append(f"seed{opt.seed}")
 
     if retain_pseudo_str: folder_components.append(retain_pseudo_str) # retain_pseudo_str 本身不含底線
+    if consistency_str: folder_components.append(consistency_str)
 
     folder_components.append("CE")
 
@@ -1154,7 +1413,22 @@ def generate_experiment_folder_name(opt, bert_path):
     model_name = os.path.basename(bert_path.rstrip('/'))  # 移除末尾的斜線並取得最後一個路徑部分
     
     # 根據偽標籤選擇策略決定顯示的模式
-    if opt.pseudo_selector == 'nest':
+    if opt.pseudo_selector == 'hybrid':
+        if opt.hybrid_alternating:
+            selector_str = "hybrid_alt"
+        else:
+            rev_str = "rev_" if opt.hybrid_reverse else ""
+            selector_str = f"hybrid_{rev_str}switch{opt.hybrid_switch_round}"
+        # Hybrid 模式下，NeST 參數也需要記錄
+        knn_emb_str = f"_knn{opt.knn_embedding_mode}" if opt.knn_embedding_mode != 'cls' else ""
+        nest_str = f"_nest_k{opt.nest_k}_{opt.nest_divergence_mode}{knn_emb_str}"
+        selector_str += nest_str
+        
+        # 混合模式初期使用 threshold，後期使用 nest multiplier
+        threshold_str = f"th{opt.threshold}_"
+        nest_multiplier_str = f"_nestmul{opt.nest_multiplier:g}".replace(".", "p")
+        nest_params_str = f"_nbeta{opt.nest_beta}_nm{opt.nest_m}"
+    elif opt.pseudo_selector == 'nest':
         # 加入 knn_embedding_mode 以區分不同 embedding 模式 (cls, emotion_clause, cause_clause)
         knn_emb_str = f"_knn{opt.knn_embedding_mode}" if opt.knn_embedding_mode != 'cls' else ""
         selector_str = f"nest_k{opt.nest_k}_{opt.nest_divergence_mode}{knn_emb_str}"
@@ -1186,6 +1460,7 @@ def generate_experiment_folder_name(opt, bert_path):
     nlm_str = f"_nlm{opt.nest_loss_mode}" if opt.nest_loss_mode == 'nest' else ""
     
     # 定義資料夾名稱組成元素
+    consistency_str = "consistency" if opt.consistency_pseudo else ""
     folder_components = [
         f"UECA-CE_ST_{timestamp}",
         f"f{opt.start_fold}-{opt.end_fold}",
@@ -1202,6 +1477,7 @@ def generate_experiment_folder_name(opt, bert_path):
         f"st{opt.self_training_rounds}",
         f"ste{opt.st_training_epochs}",
         f"seed{opt.seed}",
+        f"{consistency_str}",
         f"test_model_type_{opt.test_model_type}"
     ]
 
@@ -1398,10 +1674,13 @@ class UnlabeledDataset(Dataset):
             
         print(f'UnlabeledDataset: n_cut {self.n_cut}, total_documents {len(self.x_bert)}')
         print('load unlabeled data done!\n')
+        
     def __getitem__(self, index):
         return self.x_bert[index]
+    
     def __len__(self):
         return len(self.x_bert)
+    
     def remove_by_doc_ids(self, doc_ids):
         id_set = set(doc_ids)
         keep_indices = [idx for idx, doc_id in enumerate(self.doc_id) if doc_id not in id_set]
@@ -1992,6 +2271,177 @@ def write_best_val_checkpoint(info_path, stage, iteration, val_loss, metrics, ch
         )
 
 
+def append_pseudo_sample_entry(state, doc_id, x_np, pseudo_np, tokenizer, mask_confidences=None):
+    """將一筆偽標籤樣本加入訓練集，並記錄評估與日誌資訊。"""
+    # 複製輸入資料，避免後續修改影響原始資料
+    x_copy = np.array(x_np, dtype=np.int64)
+    pseudo_array = np.array(pseudo_np, dtype=np.int64)
+    # ===== 1. 加入訓練用資料集 =====
+    # (x_copy, pseudo_array) 將在訓練時作為 (輸入, 偽標籤) 使用
+    state['round_pseudo_labeled_samples'].append((x_copy, pseudo_array))
+    state['round_pseudo_doc_ids'].append(doc_id)
+    # ===== 1.1 記錄「本輪實際納入訓練」的樣本歷史 =====
+    # 這段放在 append_pseudo_sample，可同時覆蓋 threshold / nest / random 三種模式
+    # 並且以「實際通過篩選後加入訓練」為準 (含 consistency 過濾後)
+    current_round = state['self_round'] + 1
+    if doc_id not in state['doc_selection_history']:
+        state['doc_selection_history'][doc_id] = []
+    # 避免同一輪重複記錄（例如其他分支已先記一次）
+    if current_round not in state['doc_selection_history'][doc_id]:
+        state['doc_selection_history'][doc_id].append(current_round)
+    # ===== 2. 加入預測結果記錄 (用於後續保存) =====
+    state['all_pseudo_predictions'].append({
+        'doc_id': doc_id,
+        'x_bert': x_copy,
+        'pseudo_labels': pseudo_array
+    })
+    # ===== 3. 建立日誌項目 (用於 JSON 輸出) =====
+    # 將偽標籤的 token ids 轉換為可讀的 token 字串
+    pred_tokens_list = tokenizer.convert_ids_to_tokens(pseudo_array.tolist())
+    pseudo_entry = {
+        "doc_id": doc_id,
+        "pseudo_label_ids": pseudo_array.tolist(), # 偽標籤的 token id 列表
+        "pseudo_label_tokens": pred_tokens_list,  # 偽標籤的 token 字串列表
+        "ground_truth_available": False,  # 預設無真實答案
+    }
+    if mask_confidences is not None:
+        pseudo_entry["mask_confidences"] = mask_confidences
+    # ===== 4. 如果需要評估偽標籤品質（與真實答案比較) =====
+    if state['evaluate_pseudo']:
+        # 從對照表取得該文檔的真實答案
+        gt_tokens = state['pseudo_ground_truth_map'].get(doc_id)
+
+        if gt_tokens is None:
+            # 情況 A：該文檔沒有真實答案可比較
+            state['pseudo_eval_records'].append({
+                'doc_id': doc_id,
+                'skip_reason': 'no_ground_truth',
+            })
+            pseudo_entry["skip_reason"] = "no_ground_truth"
+        else:
+            gt_array = np.array(gt_tokens, dtype=np.int64)
+
+            if gt_array.shape[0] != pseudo_array.shape[0]:
+                # 情況 B：長度不匹配 (可能因文檔被截斷)
+                state['pseudo_eval_records'].append({
+                    'doc_id': doc_id,
+                    'skip_reason': f'length_mismatch(gt={gt_array.shape[0]}, pseudo={pseudo_array.shape[0]})'
+                })
+                pseudo_entry["skip_reason"] = "length_mismatch"
+                pseudo_entry["ground_truth_available"] = False
+            else:
+                # 情況 C：可以正常比較
+                # 計算每個位置是否匹配
+                match_mask = (pseudo_array == gt_array)
+                correct = int(match_mask.sum())
+                total = int(match_mask.size)
+                # 找出不匹配的位置索引
+                mismatch_positions = np.where(~match_mask)[0].tolist()
+                # 累加到全域統計
+                state['pseudo_eval_correct'] += correct
+                state['pseudo_eval_total'] += total
+                # ===== 5. 計算過濾後的統計 (排除「非非无」的情況) =====
+                # 目的：排除「非情緒、非原因、無配對」的子句，這些預測正確較容易
+                gt_tokens_list = tokenizer.convert_ids_to_tokens(gt_array.tolist())
+                # triple_mask: True 表示該位置要計入統計，False 表示要排除
+                triple_mask = np.ones_like(gt_array, dtype=bool)
+                # 每 3 個 token 為一組 (情緒、原因、配對)
+                for idx_mask in range(0, len(gt_tokens_list), 3):
+                    gt_triple = gt_tokens_list[idx_mask:idx_mask + 3]
+                    pred_triple = pred_tokens_list[idx_mask:idx_mask + 3]
+                    # 如果真實答案和預測都是「非非无」，則排除此三元組
+                    if (len(gt_triple) == 3 and len(pred_triple) == 3 and
+                            gt_triple == ['非', '非', '无'] and
+                            pred_triple == ['非', '非', '无']):
+                        triple_mask[idx_mask:idx_mask + 3] = False
+                # 計算過濾後的統計
+                filtered_match = match_mask[triple_mask]
+                if filtered_match.size > 0:
+                    filtered_correct = int(filtered_match.sum())
+                    filtered_total = int(filtered_match.size)
+                    filtered_error_rate = 1.0 - (filtered_correct / filtered_total)
+                    state['pseudo_eval_filtered_correct'] += filtered_correct
+                    state['pseudo_eval_filtered_total'] += filtered_total
+                else:
+                    # 所有預測都是「非非无」，無法計算過濾後統計
+                    filtered_correct = 0
+                    filtered_total = 0
+                    filtered_error_rate = None
+                # ===== 6. 記錄詳細評估結果 =====
+                state['pseudo_eval_records'].append({
+                    'doc_id': doc_id,
+                    'correct': correct,
+                    'total': total,
+                    'error_rate': 1.0 - (correct / total) if total else 0.0,
+                    'pred_tokens': pseudo_array.tolist(),
+                    'gt_tokens': gt_array.tolist(),
+                    'mismatch_positions': mismatch_positions,
+                    'filtered_correct': filtered_correct,
+                    'filtered_total': filtered_total,
+                    'filtered_error_rate': filtered_error_rate,
+                })
+                # 更新 pseudo_entry 的真實答案資訊
+                pseudo_entry["ground_truth_available"] = True
+                pseudo_entry["gt_label_ids"] = gt_array.tolist()
+                pseudo_entry["gt_label_tokens"] = gt_tokens_list
+                pseudo_entry["match_ratio"] = (correct / total) if total else None
+                pseudo_entry["mismatch_positions"] = mismatch_positions
+                if filtered_error_rate is not None:
+                    pseudo_entry["filtered_match_ratio"] = filtered_correct / filtered_total
+                    pseudo_entry["filtered_error_rate"] = filtered_error_rate
+                # 記錄被忽略的三元組數量
+                pseudo_entry["ignored_triples"] = int((~triple_mask).sum() // 3)
+    # 將此樣本的日誌項目加入列表
+    state['pseudo_logging_entries'].append(pseudo_entry)
+
+
+def record_consistency_rejection_entry(state, doc_id, pseudo_np, tokenizer, mask_confidences=None):
+    """記錄被 task consistency 拒絕的樣本，並與 GT 比較 (若可用)
+    
+    用途：分析「閾值通過但 consistency 拒絕」的樣本是否為高信心錯誤預測
+    """
+    pseudo_array = np.array(pseudo_np, dtype=np.int64)
+    pred_tokens_list = tokenizer.convert_ids_to_tokens(pseudo_array.tolist())
+    record = {
+        'doc_id': doc_id,
+        'selector': state['current_selector'],
+        'pseudo_label_tokens': pred_tokens_list,
+    }
+    if mask_confidences is not None:
+        record['mask_confidences'] = mask_confidences
+
+    if state['evaluate_pseudo']:
+        gt_tokens = state['pseudo_ground_truth_map'].get(doc_id)
+        if gt_tokens is None:
+            raise RuntimeError(
+                f"[Pseudo GT Error] doc_id={doc_id} 找不到 ground truth，"
+                "目前流程要求每筆資料都必須可取得正確答案"
+            )
+        gt_array = np.array(gt_tokens, dtype=np.int64)
+        if gt_array.shape[0] != pseudo_array.shape[0]:
+            gt_tokens_preview = tokenizer.convert_ids_to_tokens(gt_array[:12].tolist())
+            pseudo_tokens_preview = pred_tokens_list[:12]
+            raise RuntimeError(
+                "[Pseudo GT Error] 發生長度不一致，"
+                f"doc_id={doc_id}, gt_len={gt_array.shape[0]}, pseudo_len={pseudo_array.shape[0]}, "
+                f"gt_preview={gt_tokens_preview}, pseudo_preview={pseudo_tokens_preview}"
+            )
+
+        match_mask = (pseudo_array == gt_array)
+        correct = int(match_mask.sum())
+        total = int(match_mask.size)
+        gt_tokens_list = tokenizer.convert_ids_to_tokens(gt_array.tolist())
+        record['gt_eval'] = {
+            'correct': correct,
+            'total': total,
+            'match_ratio': correct / total if total else None,
+            'gt_tokens': gt_tokens_list,
+            'mismatch_positions': np.where(~match_mask)[0].tolist(),
+        }
+
+    state['consistency_rejected_records'].append(record)
+
+
 def _run_main(save_path):
     log_dir = os.path.join(save_path, "init_supervised_metrics")
     os.makedirs(log_dir, exist_ok=True)
@@ -2038,9 +2488,15 @@ def _run_main(save_path):
     for fold in range(opt.start_fold, opt.end_fold + 1):
         fold_start_time = time.time()  # 記錄當前 fold 開始時間
         print(f"\n  Fold {fold} 開始時間: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
-        best_val_info_path = os.path.join(save_path, f'fold{fold}_best_val_checkpoint.txt') # 用來記錄在驗證集上最佳的結果
-        if os.path.exists(best_val_info_path):
-            os.remove(best_val_info_path)
+        best_val_pair_info_path = os.path.join(save_path, f'fold{fold}_best_val_checkpoint_pair.txt') # 用來記錄 pair 在驗證集上最佳的結果
+        best_val_emo_info_path = os.path.join(save_path, f'fold{fold}_best_val_checkpoint_emo.txt')
+        best_val_cause_info_path = os.path.join(save_path, f'fold{fold}_best_val_checkpoint_cause.txt')
+        if os.path.exists(best_val_pair_info_path):
+            os.remove(best_val_pair_info_path)
+        if os.path.exists(best_val_emo_info_path):
+            os.remove(best_val_emo_info_path)
+        if os.path.exists(best_val_cause_info_path):
+            os.remove(best_val_cause_info_path)
         best_val_stage = None
         
     # 載入模型
@@ -2052,20 +2508,20 @@ def _run_main(save_path):
         if opt.checkpoint:
             if opt.test_model_type == 'self_training':
                 # 載入 Self-training 的最佳模型
-                st_model_path = os.path.join(opt.checkpointpath, 'self_training_models', f'fold{fold}_self_training_best.pth')
+                st_model_path = os.path.join(opt.checkpointpath, 'self_training_models', f'fold{fold}_self_training_best_pair.pth')
                 if os.path.exists(st_model_path):
                     model = torch.load(st_model_path, map_location=torch.device('cpu'))
                     print(f'載入 Self-training 最佳模型: {st_model_path}')
                 else:
                     print(f'Self-training 模型不存在: {st_model_path}')
                     print('回退到初始模型...')
-                    model = torch.load(opt.checkpointpath + '/fold{}.pth'.format(fold),
+                    model = torch.load(opt.checkpointpath + '/fold{}_best_pair.pth'.format(fold),
                                        map_location=torch.device('cpu'))
             else:
                 # 載入初始監督學習模型
-                model = torch.load(opt.checkpointpath + '/fold{}.pth'.format(fold),
+                model = torch.load(opt.checkpointpath + '/fold{}_best_pair.pth'.format(fold),
                                    map_location=torch.device('cpu'))
-                print(f'載入初始監督學習模型: {opt.checkpointpath}/fold{fold}.pth')
+                print(f'載入初始監督學習模型: {opt.checkpointpath}/fold{fold}_best_pair.pth')
         if use_gpu:
             model = model.cuda()
 
@@ -2114,6 +2570,7 @@ def _run_main(save_path):
     
         max_p_emotion, max_r_emotion, max_f1_emotion, max_p_cause, max_r_cause, max_f1_cause, max_p_pair,\
         max_r_pair, max_f1_pair = [-1.] * 9
+        current_self_training_model_source = "目前記憶體中的 model (未指定來源路徑)"
         optimizer = torch.optim.AdamW(model.parameters(), lr=opt.learning_rate, weight_decay=opt.weight_decay)
         # 每折初始化訓練步驟記錄檔，與 UECA_CE_val_version.py 的行為一致
         training_metrics_file = os.path.join(save_path, f'fold{fold}_training_step_metrics.txt')
@@ -2123,12 +2580,13 @@ def _run_main(save_path):
         # 檢查是否要跳過初始訓練
         if opt.skip_initial_training:
             print("=== 跳過初始監督訓練，直接載入預訓練模型 ===")
-            pretrained_model_path = os.path.join(opt.save_path, f'fold{fold}.pth')
+            pretrained_model_path = os.path.join(opt.save_path, f'fold{fold}_best_pair.pth')
             if os.path.exists(pretrained_model_path):
                 model = torch.load(pretrained_model_path, map_location=torch.device('cuda' if use_gpu else 'cpu'))
                 if use_gpu:
                     model = model.cuda()
                 print(f"已載入預訓練模型: {pretrained_model_path}")
+                current_self_training_model_source = pretrained_model_path
                 
                 # 直接跳到 self-training 部分（資料夾會在後面統一建立）
                 print("=== 跳過初始訓練，準備進行 Self-Training ===")
@@ -2345,35 +2803,70 @@ def _run_main(save_path):
                             p_pair,
                             r_pair,
                             f_pair))
+                    metrics_dict = {
+                        "p_emotion": p_emotion,
+                        "r_emotion": r_emotion,
+                        "f_emotion": f_emotion,
+                        "p_cause": p_cause,
+                        "r_cause": r_cause,
+                        "f_cause": f_cause,
+                        "p_pair": p_pair,
+                        "r_pair": r_pair,
+                        "f_pair": f_pair,
+                    }
                     if f_emotion > max_f1_emotion:
                         max_f1_emotion, max_p_emotion, max_r_emotion = f_emotion, p_emotion, r_emotion
-                    if f_cause > max_f1_cause:
-                        max_f1_cause, max_p_cause, max_r_cause = f_cause, p_cause, r_cause
-                    if f_pair > max_f1_pair:
-                        max_f1_pair, max_p_pair, max_r_pair = f_pair, p_pair, r_pair
-                        print(f"  新的最佳 F1: {f_pair:.4f} at iter {i}")
-                        checkpoint_path = os.path.join(save_path, f'fold{fold}.pth')
+                        emo_checkpoint_path = os.path.join(save_path, f'fold{fold}_best_emo.pth')
                         if opt.savecheckpoint:
-                            torch.save(model, checkpoint_path)
-                            print(f"Model for fold {fold} saved to {checkpoint_path}")
-                        metrics_dict = {
-                            "p_emotion": p_emotion,
-                            "r_emotion": r_emotion,
-                            "f_emotion": f_emotion,
-                            "p_cause": p_cause,
-                            "r_cause": r_cause,
-                            "f_cause": f_cause,
-                            "p_pair": p_pair,
-                            "r_pair": r_pair,
-                            "f_pair": f_pair,
-                        }
+                            torch.save(model, emo_checkpoint_path)
+                            print(f"Model for fold {fold} (best emotion F1) saved to {emo_checkpoint_path}")
                         write_best_val_checkpoint(
-                            best_val_info_path,
+                            best_val_emo_info_path,
                             stage="supervised_training",
                             iteration=i + 1,
                             val_loss=avg_val_loss,
                             metrics=metrics_dict,
-                            checkpoint_path=checkpoint_path if opt.savecheckpoint else ""
+                            checkpoint_path=emo_checkpoint_path if opt.savecheckpoint else ""
+                        )
+                    if f_cause > max_f1_cause:
+                        max_f1_cause, max_p_cause, max_r_cause = f_cause, p_cause, r_cause
+                        cause_checkpoint_path = os.path.join(save_path, f'fold{fold}_best_cause.pth')
+                        if opt.savecheckpoint:
+                            torch.save(model, cause_checkpoint_path)
+                            print(f"Model for fold {fold} (best cause F1) saved to {cause_checkpoint_path}")
+                        write_best_val_checkpoint(
+                            best_val_cause_info_path,
+                            stage="supervised_training",
+                            iteration=i + 1,
+                            val_loss=avg_val_loss,
+                            metrics=metrics_dict,
+                            checkpoint_path=cause_checkpoint_path if opt.savecheckpoint else ""
+                        )
+                    if f_pair > max_f1_pair:
+                        max_f1_pair, max_p_pair, max_r_pair = f_pair, p_pair, r_pair
+                        print(f"  新的最佳 F1: {f_pair:.4f} at iter {i}")
+                        if opt.save_val_predictions:
+                            # 只在 best pair 更新時儲存驗證集預測，確保可與最佳模型一一對應
+                            save_mask_predictions(
+                                all_val_logits,
+                                all_val_x_bert,
+                                tokenizer,
+                                NLP_Dataset['val'].doc_id,
+                                fold=fold,
+                                output_dir=save_path,
+                                base_filename="val_text_result_best_pair",
+                            )
+                        pair_checkpoint_path = os.path.join(save_path, f'fold{fold}_best_pair.pth')
+                        if opt.savecheckpoint:
+                            torch.save(model, pair_checkpoint_path)
+                            print(f"Model for fold {fold} (best pair F1) saved to {pair_checkpoint_path}")
+                        write_best_val_checkpoint(
+                            best_val_pair_info_path,
+                            stage="supervised_training",
+                            iteration=i + 1,
+                            val_loss=avg_val_loss,
+                            metrics=metrics_dict,
+                            checkpoint_path=pair_checkpoint_path if opt.savecheckpoint else ""
                         )
                         best_val_stage = "supervised_training"
                     print("iter{} test result:".format(i))
@@ -2407,11 +2900,12 @@ def _run_main(save_path):
                 f.write(f"Best F1 achieved: {max_f1_pair:.4f}\n")  # 應該用 max_f1_pair 而不是 best_val_f1
 
             # ====== 當前第 i 折最佳模型的路徑 ======
-            model_path = save_path + '/' + 'fold{}.pth'.format(fold)
+            model_path = save_path + '/' + 'fold{}_best_pair.pth'.format(fold)
             model = torch.load(model_path, map_location=torch.device('cuda' if use_gpu else 'cpu'))
             if use_gpu:
                 model = model.cuda()
             print(f"已載入初始化監督訓練的最佳模型: {model_path}")
+            current_self_training_model_source = model_path
             
             # 輸出當前 fold 的早停資訊
             supervised_training_total_time = time.time() - supervised_training_start_time
@@ -2441,9 +2935,44 @@ def _run_main(save_path):
         print(f"  Self-training 開始時間: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
         nest_prev_scores = {}  # 使用 dict {doc_id: ema_score} 追蹤每個樣本的 EMA 分數
         doc_selection_history = {}  # 記錄每個 doc_id 在哪幾輪被選中 {doc_id: [round1, round2, ...]}
+
+        # 自訓練階段的跨輪最佳指標 (用於保存全域最佳模型)
+        st_max_f1_emotion = -1.0
+        st_max_f1_cause = -1.0
+        st_max_f1_pair = -1.0
+        st_max_p_pair = -1.0
+        st_max_r_pair = -1.0
         
         for self_round in range(opt.self_training_rounds):
             round_start_time = time.time()  # 記錄每輪開始時間
+            
+            # Hybrid 策略: 決定本輪使用的選擇器
+            current_selector = opt.pseudo_selector
+            if opt.pseudo_selector == 'hybrid':
+                if opt.hybrid_alternating:
+                    # 交替模式: 奇數輪 Threshold，偶數輪 NeST (輪次從 1 開始計算)
+                    if (self_round + 1) % 2 == 1:  # 奇數輪 (R1, R3, R5, ...)
+                        current_selector = 'threshold'
+                        print(f"Hybrid Strategy (Alternating): Round {self_round+1} 使用 Threshold 模式 (奇數輪)")
+                    else:  # 偶數輪 (R2, R4, R6, ...)
+                        current_selector = 'nest'
+                        print(f"Hybrid Strategy (Alternating): Round {self_round+1} 使用 NeST 模式 (偶數輪)")
+                elif opt.hybrid_reverse:
+                    # 反轉模式: 前期 NeST，後期 Threshold
+                    if self_round < opt.hybrid_switch_round:
+                        current_selector = 'nest'
+                        print(f"Hybrid Strategy (Reverse): Round {self_round+1} 使用 NeST 模式 (尚未達到切換輪次 {opt.hybrid_switch_round})")
+                    else:
+                        current_selector = 'threshold'
+                        print(f"Hybrid Strategy (Reverse): Round {self_round+1} 切換為 Threshold 模式")
+                else:
+                    # 正常模式: 前期 Threshold，後期 NeST
+                    if self_round < opt.hybrid_switch_round:
+                        current_selector = 'threshold'
+                        print(f"Hybrid Strategy: Round {self_round+1} 使用 Threshold 模式 (尚未達到切換輪次 {opt.hybrid_switch_round})")
+                    else:
+                        current_selector = 'nest'
+                        print(f"Hybrid Strategy: Round {self_round+1} 切換為 NeST 模式")
             print(f"=== Self-training round {self_round+1} / {opt.self_training_rounds} ===")
             print(f"  Round {self_round+1} 開始時間: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
             if unlabeled_loader is None or len(unlabeled_dataset) == 0:
@@ -2453,16 +2982,19 @@ def _run_main(save_path):
             # 如果不是第一輪 self-training，載入前一輪的最佳模型
             if self_round > 0:
                 st_save_dir = os.path.join(save_path, 'self_training_models')
-                prev_best_model_path = os.path.join(st_save_dir, f'fold{fold}_self_training_best.pth')
+                prev_best_model_path = os.path.join(st_save_dir, f'fold{fold}_self_training_best_pair.pth')
                 if os.path.exists(prev_best_model_path):
                     model = torch.load(prev_best_model_path, map_location=torch.device('cuda' if use_gpu else 'cpu'))
                     if use_gpu:
                         model = model.cuda()
                     print(f"  已載入前一輪最佳模型: {prev_best_model_path}")
+                    current_self_training_model_source = prev_best_model_path
                     # 重新初始化優化器，使用新模型的參數
                     optimizer = torch.optim.AdamW(model.parameters(), lr=opt.learning_rate, weight_decay=opt.weight_decay)
                 else:
                     print(f"  找不到前一輪最佳模型: {prev_best_model_path}，繼續使用當前模型")
+
+            print(f"  本輪未標註樣本主模型來源: {current_self_training_model_source}")
             
             with torch.no_grad():
                 model.eval()
@@ -2473,146 +3005,77 @@ def _run_main(save_path):
                 batch_start_idx = 0
                 pseudo_logging_entries = []
                 pseudo_eval_records = []
-                pseudo_eval_correct = 0
-                pseudo_eval_total = 0
-                pseudo_eval_filtered_correct = 0
-                pseudo_eval_filtered_total = 0
                 evaluate_pseudo = opt.log_pseudo_quality and bool(pseudo_ground_truth_map) # 決定是否要進行偽標籤 vs 真實答案的比較評估，當「使用者要求紀錄品質」且「成功建立了真實答案對照表」時
+                consistency_debug_records = [] if opt.save_consistency_predictions else None
+                consistency_rejected_records = []  # 記錄被 consistency 拒絕的樣本的 GT 評估
 
-                def append_pseudo_sample(doc_id, x_np, pseudo_np):
-                    """
-                    將一筆偽標籤樣本加入訓練集，並記錄相關統計資訊
-                    
-                    參數:
-                        doc_id: 文檔 ID (字串)
-                        x_np: 輸入的 token ids
-                        pseudo_np: 模型預測的偽標籤 token ids
-                    """
-                    # 使用 nonlocal 宣告要修改外層函式的變數 (累計統計用)
-                    nonlocal pseudo_eval_correct, pseudo_eval_total, pseudo_eval_filtered_correct, pseudo_eval_filtered_total
-                    
-                    # 複製輸入資料，避免後續修改影響原始資料
-                    x_copy = np.array(x_np, dtype=np.int64)
-                    pseudo_array = np.array(pseudo_np, dtype=np.int64)
-                    
-                    # ===== 1. 加入訓練用資料集 =====
-                    # (x_copy, pseudo_array) 將在訓練時作為 (輸入, 偽標籤) 使用
-                    round_pseudo_labeled_samples.append((x_copy, pseudo_array))
-                    round_pseudo_doc_ids.append(doc_id)
-                    
-                    # ===== 2. 加入預測結果記錄 (用於後續保存) =====
-                    all_pseudo_predictions.append({
-                        'doc_id': doc_id,
-                        'x_bert': x_copy,
-                        'pseudo_labels': pseudo_array
-                    })
+                # ===== Task Consistency 設定 =====
+                consistency_enabled = bool(opt.consistency_pseudo and opt.consistency_require_all_equal)  # 是否啟用一致性過濾 (需同時開啟 consistency_pseudo 與 all-equal 規則)
+                consistency_stats = {  # 一致性統計計數器
+                    "checked": 0,  # 記錄本輪進行一致性檢查的樣本數
+                    "accept": 0,  # 記錄本輪通過一致性檢查的樣本數
+                    "reject": 0,  # 記錄本輪未通過一致性檢查的樣本數
+                    "skip_unavailable": 0,  # 記錄因模型不可用而跳過一致性檢查的樣本數
+                }
+                consistency_models = None  # 暫存一致性檢查使用的三個模型 (emo, cause, pair)
 
-                    # ===== 3. 建立日誌項目 (用於 JSON 輸出) =====
-                    # 將偽標籤的 token ids 轉換為可讀的 token 字串
-                    pred_tokens_list = tokenizer.convert_ids_to_tokens(pseudo_array.tolist())
-                    pseudo_entry = {
-                        "doc_id": doc_id,
-                        "pseudo_label_ids": pseudo_array.tolist(),      # 偽標籤的 token id 列表
-                        "pseudo_label_tokens": pred_tokens_list,        # 偽標籤的 token 字串列表
-                        "ground_truth_available": False,                # 預設無真實答案
-                    }
+                if consistency_enabled:  # 只有啟用一致性時，才需要準備三模型
+                    if opt.consistency_model_source == 'self_training_best' and self_round > 0:  # 指定使用 self-training 模型且目前為第 2 輪以上
+                        # 第 N 輪 (N>=2) 使用「跨輪歷史最佳」三模型，而非上一輪快照
+                        emo_model_path = os.path.join(save_path, 'self_training_models', f'fold{fold}_self_training_best_emo.pth')
+                        cause_model_path = os.path.join(save_path, 'self_training_models', f'fold{fold}_self_training_best_cause.pth')
+                        pair_model_path = os.path.join(save_path, 'self_training_models', f'fold{fold}_self_training_best_pair.pth')
+                        print("[Task Consistency] 使用跨輪歷史最佳三模型 (self_training_best_emo/cause/pair)")
+                    else:
+                        # Round 1 或指定 supervised_best：使用監督式三模型
+                        emo_model_path = os.path.join(save_path, f'fold{fold}_best_emo.pth')  # 監督式最佳 emotion 模型路徑
+                        cause_model_path = os.path.join(save_path, f'fold{fold}_best_cause.pth')  # 監督式最佳 cause 模型路徑
+                        pair_model_path = os.path.join(save_path, f'fold{fold}_best_pair.pth')  # 監督式最佳 pair 模型路徑
+                        if opt.consistency_model_source == 'self_training_best' and self_round == 0:  # 若使用者指定 self-training 來源但目前是第 1 輪
+                            print("[Task Consistency] Round 1 尚無上一輪自訓練模型，改用監督式三模型")  # 說明自動回退行為
 
-                    # ===== 4. 如果需要評估偽標籤品質（與真實答案比較) =====
-                    if evaluate_pseudo:
-                        # 從對照表取得該文檔的真實答案
-                        gt_tokens = pseudo_ground_truth_map.get(doc_id)
-                        
-                        if gt_tokens is None:
-                            # 情況 A：該文檔沒有真實答案可比較
-                            pseudo_eval_records.append({
-                                'doc_id': doc_id,
-                                'skip_reason': 'no_ground_truth',
-                            })
-                            pseudo_entry["skip_reason"] = "no_ground_truth"
-                        else:
-                            gt_array = np.array(gt_tokens, dtype=np.int64)
-                            
-                            if gt_array.shape[0] != pseudo_array.shape[0]:
-                                # 情況 B：長度不匹配 (可能因文檔被截斷)
-                                pseudo_eval_records.append({
-                                    'doc_id': doc_id,
-                                    'skip_reason': f'length_mismatch(gt={gt_array.shape[0]}, pseudo={pseudo_array.shape[0]})'
-                                })
-                                pseudo_entry["skip_reason"] = "length_mismatch"
-                                pseudo_entry["ground_truth_available"] = False
-                            else:
-                                # 情況 C：可以正常比較
-                                # 計算每個位置是否匹配
-                                match_mask = (pseudo_array == gt_array)
-                                correct = int(match_mask.sum())       # 正確預測的 token 數
-                                total = int(match_mask.size)          # 總 token 數
-                                # 找出不匹配的位置索引
-                                mismatch_positions = np.where(~match_mask)[0].tolist()
-                                
-                                # 累加到全域統計
-                                pseudo_eval_correct += correct
-                                pseudo_eval_total += total
+                    if not (os.path.exists(emo_model_path) and os.path.exists(cause_model_path) and os.path.exists(pair_model_path)):  # 任一模型檔缺失都不能做一致性檢查
+                        error_msg = (
+                            "[Task Consistency] 缺少一致性檢查所需三模型檔案，停止執行\n"
+                            f"  emo: {emo_model_path}\n"
+                            f"  cause: {cause_model_path}\n"
+                            f"  pair: {pair_model_path}\n"
+                            "請確認模型已正確產生，或關閉 --consistency_pseudo 後再執行"
+                        )
+                        raise FileNotFoundError(error_msg)
+                    else:
+                        emo_model = torch.load(emo_model_path, map_location=torch.device('cuda' if use_gpu else 'cpu'))  # 載入 emotion 模型
+                        cause_model = torch.load(cause_model_path, map_location=torch.device('cuda' if use_gpu else 'cpu'))  # 載入 cause 模型
+                        pair_model = torch.load(pair_model_path, map_location=torch.device('cuda' if use_gpu else 'cpu'))  # 載入 pair 模型
+                        if use_gpu:  # 若目前使用 GPU，將三模型搬到 CUDA
+                            emo_model = emo_model.cuda()  # emotion 模型移至 GPU
+                            cause_model = cause_model.cuda()  # cause 模型移至 GPU
+                            pair_model = pair_model.cuda()  # pair 模型移至 GPU
+                        emo_model.eval()  # 設為推論模式 (關閉 dropout 等訓練行為)
+                        cause_model.eval()  # 設為推論模式 (關閉 dropout 等訓練行為)
+                        pair_model.eval()  # 設為推論模式 (關閉 dropout 等訓練行為)
+                        consistency_models = (emo_model, cause_model, pair_model)  # 打包三模型，供後續一致性函式使用
+                        print("[Task Consistency] 已載入三模型: best_emo / best_cause / best_pair")  # 載入成功提示
 
-                                # ===== 5. 計算過濾後的統計 (排除「非非无」的情況) =====
-                                # 目的：排除「非情緒、非原因、無配對」的子句，這些預測正確較容易
-                                gt_tokens_list = tokenizer.convert_ids_to_tokens(gt_array.tolist())
-                                # triple_mask: True 表示該位置要計入統計，False 表示要排除
-                                triple_mask = np.ones_like(gt_array, dtype=bool)
-                                
-                                # 每 3 個 token 為一組 (情緒、原因、配對)
-                                for idx_mask in range(0, len(gt_tokens_list), 3):
-                                    gt_triple = gt_tokens_list[idx_mask:idx_mask + 3]
-                                    pred_triple = pred_tokens_list[idx_mask:idx_mask + 3]
-                                    # 如果真實答案和預測都是「非非无」，則排除此三元組
-                                    if (len(gt_triple) == 3 and len(pred_triple) == 3 and
-                                            gt_triple == ['非', '非', '无'] and
-                                            pred_triple == ['非', '非', '无']):
-                                        triple_mask[idx_mask:idx_mask + 3] = False
+                pseudo_eval_state = {
+                    'self_round': self_round,
+                    'current_selector': current_selector,
+                    'evaluate_pseudo': evaluate_pseudo,
+                    'pseudo_ground_truth_map': pseudo_ground_truth_map,
+                    'round_pseudo_labeled_samples': round_pseudo_labeled_samples,
+                    'round_pseudo_doc_ids': round_pseudo_doc_ids,
+                    'all_pseudo_predictions': all_pseudo_predictions,
+                    'pseudo_logging_entries': pseudo_logging_entries,
+                    'pseudo_eval_records': pseudo_eval_records,
+                    'consistency_rejected_records': consistency_rejected_records,
+                    'doc_selection_history': doc_selection_history,
+                    'pseudo_eval_correct': 0,
+                    'pseudo_eval_total': 0,
+                    'pseudo_eval_filtered_correct': 0,
+                    'pseudo_eval_filtered_total': 0,
+                }
 
-                                # 計算過濾後的統計
-                                filtered_match = match_mask[triple_mask]
-                                if filtered_match.size > 0:
-                                    filtered_correct = int(filtered_match.sum())
-                                    filtered_total = int(filtered_match.size)
-                                    filtered_error_rate = 1.0 - (filtered_correct / filtered_total)
-                                    pseudo_eval_filtered_correct += filtered_correct
-                                    pseudo_eval_filtered_total += filtered_total
-                                else:
-                                    # 所有預測都是「非非无」，無法計算過濾後統計
-                                    filtered_correct = 0
-                                    filtered_total = 0
-                                    filtered_error_rate = None
-
-                                # ===== 6. 記錄詳細評估結果 =====
-                                pseudo_eval_records.append({
-                                    'doc_id': doc_id,
-                                    'correct': correct,
-                                    'total': total,
-                                    'error_rate': 1.0 - (correct / total) if total else 0.0,
-                                    'pred_tokens': pseudo_array.tolist(),
-                                    'gt_tokens': gt_array.tolist(),
-                                    'mismatch_positions': mismatch_positions,
-                                    'filtered_correct': filtered_correct,
-                                    'filtered_total': filtered_total,
-                                    'filtered_error_rate': filtered_error_rate,
-                                })
-
-                                # 更新 pseudo_entry 的真實答案資訊
-                                pseudo_entry["ground_truth_available"] = True
-                                pseudo_entry["gt_label_ids"] = gt_array.tolist()
-                                pseudo_entry["gt_label_tokens"] = gt_tokens_list
-                                pseudo_entry["match_ratio"] = (correct / total) if total else None
-                                pseudo_entry["mismatch_positions"] = mismatch_positions
-                                if filtered_error_rate is not None:
-                                    pseudo_entry["filtered_match_ratio"] = filtered_correct / filtered_total
-                                    pseudo_entry["filtered_error_rate"] = filtered_error_rate
-                                # 記錄被忽略的三元組數量
-                                pseudo_entry["ignored_triples"] = int((~triple_mask).sum() // 3)
-
-                    # 將此樣本的日誌項目加入列表
-                    pseudo_logging_entries.append(pseudo_entry)
-
-                if opt.pseudo_selector == 'threshold':
+                if current_selector == 'threshold':
                     mask_token_id = tokenizer.mask_token_id
                     threshold = opt.threshold
                     apply_emotion_threshold = opt.mask_threshold_mode in ('emotion', 'both', 'all')
@@ -2632,6 +3095,7 @@ def _run_main(save_path):
                         for i in range(batch_cpu.shape[0]):
                             mask_positions = np.where(batch_cpu[i] == mask_token_id)[0]
                             pseudo_label = []
+                            mask_confidences = []  # 記錄每個 mask 位置的信心度
                             all_pass = True
                             cause_predictions = {}
                             clause_emotion_confident = False
@@ -2654,6 +3118,7 @@ def _run_main(save_path):
                                         all_pass = False
                                         break
                                     pseudo_label.append(pred_token_id if isinstance(pred_token_id, int) else pred_token_id.item())
+                                    mask_confidences.append(prob_val)
                                 elif mask_type == 1:
                                     prob, pred_token_id = torch.max(logits[i, pos_idx], dim=-1)
                                     prob_val = prob.item()
@@ -2667,35 +3132,67 @@ def _run_main(save_path):
                                         break
                                     pred_token_id_val = pred_token_id if isinstance(pred_token_id, int) else pred_token_id.item()
                                     pseudo_label.append(pred_token_id_val)
+                                    mask_confidences.append(prob_val)
                                     cause_predictions[count_sentence] = (pred_token_id_val == 3221)
                                 else:  # mask_type == 2 (pair position) - 第3個[MASK]，預測「配對句編號」
-                                    if cause_predictions.get(count_sentence, False):  # 如果該子句被預測為「原因句」
+                                    if cause_predictions.get(count_sentence, False): # 如果該子句被預測為「原因句」
                                         # 建立候選配對編號列表 (在 window_size 範圍內的句子編號)
                                         case = [label_index[k] for k in range(
                                             max(0, -opt.window_size + count_sentence - 1),
                                             min(75, opt.window_size + count_sentence)
                                         )]
-                                        case.append(3187)  # 加入 "无" (無配對) 的 token id
-                                        candidate_logits = logits[i, pos_idx, case]  # 取得模型對這些候選的 logits
+                                        case.append(3187) # 加入 "无" (無配對) 的 token id
+                                        candidate_logits = logits[i, pos_idx, case] # 取得模型對這些候選的 logits
                                         # 先對 logits 做 softmax 轉成機率，然後取最大機率值和索引
                                         max_prob, selected_idx = torch.max(F.softmax(candidate_logits, dim=-1), dim=-1)
-                                        pred_token_id = case[selected_idx.item()]  # 取得預測的 token id
+                                        pred_token_id = case[selected_idx.item()] # 取得預測的 token id
                                         # all 模式: pair 位置也需檢查閾值
-                                        # 【新增】如果是 'all' 模式，檢查 pair 位置的信心度
+                                        # 新增】如果是 'all' 模式，檢查 pair 位置的信心度
                                         if apply_pair_threshold and max_prob.item() < threshold:
                                             batch_pair_filtered += 1  # 統計被 pair 閾值過濾的樣本
-                                            all_pass = False  # 信心度不足，這個樣本不通過
-                                            break  # 跳出迴圈，不繼續處理這個樣本
-                                        pseudo_label.append(pred_token_id if isinstance(pred_token_id, int) else pred_token_id.item())  # 通過檢查，加入偽標籤
+                                            all_pass = False # 信心度不足，這個樣本不通過
+                                            break # 跳出迴圈，不繼續處理這個樣本
+                                        pseudo_label.append(pred_token_id if isinstance(pred_token_id, int) else pred_token_id.item()) # 通過檢查，加入偽標籤
+                                        mask_confidences.append(max_prob.item())
                                     else:
-                                        pseudo_label.append(3187)  # 不是原因句 → 直接填 "无"
+                                        pseudo_label.append(3187) # 不是原因句 → 直接填 "无"
+                                        mask_confidences.append(None)  # 非原因句，無閾值檢查
 
                             if all_pass and mask_positions.size > 0:
                                 doc_global_idx = batch_start_idx + i
                                 doc_id = unlabeled_dataset.doc_id[doc_global_idx]
-                                append_pseudo_sample(doc_id, batch_cpu[i], pseudo_label)
-                                batch_selected += 1
+                                passed, final_pseudo = apply_task_consistency_filter(
+                                    x_np=batch_cpu[i],
+                                    default_pseudo_tokens=np.array(pseudo_label, dtype=np.int64),
+                                    consistency_enabled=consistency_enabled,
+                                    consistency_models=consistency_models,
+                                    consistency_stats=consistency_stats,
+                                    use_gpu=use_gpu,
+                                    tokenizer=tokenizer,
+                                    window_size=opt.window_size,
+                                    doc_id=doc_id,
+                                    consistency_debug_records=consistency_debug_records,
+                                )
+                                if passed and final_pseudo is not None:
+                                    append_pseudo_sample_entry(
+                                        pseudo_eval_state,
+                                        doc_id,
+                                        batch_cpu[i],
+                                        final_pseudo,
+                                        tokenizer,
+                                        mask_confidences=mask_confidences,
+                                    )
+                                    batch_selected += 1
+                                elif consistency_enabled and not passed:
+                                    record_consistency_rejection_entry(
+                                        pseudo_eval_state,
+                                        doc_id,
+                                        np.array(pseudo_label, dtype=np.int64),
+                                        tokenizer,
+                                        mask_confidences=mask_confidences,
+                                    )
 
+                        # 輸出本 batch 的統計資訊
                         if apply_pair_threshold:
                             print(f"本 batch 收集到 {batch_selected} 筆 pseudo-labeled 樣本 (閥值: {threshold}, 模式: {opt.mask_threshold_mode}, pair閾值過濾: {batch_pair_filtered} 筆)")
                         else:
@@ -2706,7 +3203,7 @@ def _run_main(save_path):
                             torch.cuda.empty_cache()
                         del logits
 
-                elif opt.pseudo_selector == 'nest':  # [AAAI 2023] NeST
+                elif current_selector == 'nest':  # [AAAI 2023] NeST
                     # 1. 收集有標註資料集的統計資訊 (特徵向量、情緒標籤、原因標籤、情緒句分佈)
                     # 取得有標註資料集的所有 doc_id 列表，用於 debug 
                     labeled_doc_ids = [NLP_Dataset['train'].doc_id[i] for i in range(len(NLP_Dataset['train']))]
@@ -2814,12 +3311,7 @@ def _run_main(save_path):
                         # 更新 nest_prev_scores dict，以便下一輪使用
                         nest_prev_scores = detailed_info['current_val_dict']
                         
-                        # 記錄被選中的樣本在哪一輪被選中
-                        selected_doc_ids_this_round = [unlabeled_doc_ids[idx] for idx in selected_indices]
-                        for doc_id in selected_doc_ids_this_round:
-                            if doc_id not in doc_selection_history:
-                                doc_selection_history[doc_id] = []
-                            doc_selection_history[doc_id].append(self_round + 1)
+                        # 樣本歷史改由 append_pseudo_sample 統一記錄（僅記錄實際納入訓練者）
                         
                         print(f"NeST 選出 {len(selected_indices)} 筆候選樣本 (目標 {num_to_select})")
                         try:
@@ -3241,11 +3733,37 @@ def _run_main(save_path):
                             if pseudo_tokens is None:
                                 continue
                             doc_id = unlabeled_dataset.doc_id[idx]
-                            append_pseudo_sample(doc_id, unlabeled_dataset.x_bert[idx], pseudo_tokens)
+                            passed, final_pseudo = apply_task_consistency_filter(
+                                x_np=unlabeled_dataset.x_bert[idx],
+                                default_pseudo_tokens=pseudo_tokens,
+                                consistency_enabled=consistency_enabled,
+                                consistency_models=consistency_models,
+                                consistency_stats=consistency_stats,
+                                use_gpu=use_gpu,
+                                tokenizer=tokenizer,
+                                window_size=opt.window_size,
+                                doc_id=doc_id,
+                                consistency_debug_records=consistency_debug_records,
+                            )
+                            if passed and final_pseudo is not None:
+                                append_pseudo_sample_entry(
+                                    pseudo_eval_state,
+                                    doc_id,
+                                    unlabeled_dataset.x_bert[idx],
+                                    final_pseudo,
+                                    tokenizer,
+                                )
+                            elif consistency_enabled and not passed:
+                                record_consistency_rejection_entry(
+                                    pseudo_eval_state,
+                                    doc_id,
+                                    pseudo_tokens,
+                                    tokenizer,
+                                )
                     else:
                         print("NeST 無可選樣本，跳過偽標籤產生")
 
-                elif opt.pseudo_selector == 'random':  # 隨機選擇策略
+                elif current_selector == 'random':  # 隨機選擇策略
                     # 1. 收集未標籤資料的偽標籤 (仍需模型推論來產生偽標籤)
                     unlabeled_doc_ids = [unlabeled_dataset.doc_id[i] for i in range(len(unlabeled_dataset))]
                     _, _, _, _, _, all_pseudo_tokens = collect_unlabeled_statistics(
@@ -3271,12 +3789,7 @@ def _run_main(save_path):
                         
                         print(f"Random 選出 {len(selected_indices)} 筆候選樣本 (目標 {num_to_select})")
                         
-                        # 記錄被選中的樣本在哪一輪被選中 (與 NeST 一致)
-                        selected_doc_ids_this_round = [unlabeled_doc_ids[idx] for idx in selected_indices]
-                        for doc_id in selected_doc_ids_this_round:
-                            if doc_id not in doc_selection_history:
-                                doc_selection_history[doc_id] = []
-                            doc_selection_history[doc_id].append(self_round + 1)
+                        # 樣本歷史改由 append_pseudo_sample 統一記錄（僅記錄實際納入訓練者）
                         
                         # 4. 將選中的樣本加入訓練集
                         for idx in selected_indices.tolist():
@@ -3284,7 +3797,34 @@ def _run_main(save_path):
                             if pseudo_tokens is None:
                                 continue
                             doc_id = unlabeled_dataset.doc_id[idx]
-                            append_pseudo_sample(doc_id, unlabeled_dataset.x_bert[idx], pseudo_tokens)
+                            passed, final_pseudo = apply_task_consistency_filter(
+                                x_np=unlabeled_dataset.x_bert[idx],
+                                default_pseudo_tokens=pseudo_tokens,
+                                consistency_enabled=consistency_enabled,
+                                consistency_models=consistency_models,
+                                consistency_stats=consistency_stats,
+                                use_gpu=use_gpu,
+                                tokenizer=tokenizer,
+                                window_size=opt.window_size,
+                                doc_id=doc_id,
+                                consistency_debug_records=consistency_debug_records,
+                            )
+                            if passed and final_pseudo is not None:
+                                append_pseudo_sample_entry(
+                                    pseudo_eval_state,
+                                    doc_id,
+                                    unlabeled_dataset.x_bert[idx],
+                                    final_pseudo,
+                                    tokenizer,
+                                )
+                            # 紀錄被拒絕的樣本以供後續分析
+                            elif consistency_enabled and not passed:
+                                record_consistency_rejection_entry(
+                                    pseudo_eval_state,
+                                    doc_id,
+                                    pseudo_tokens,
+                                    tokenizer,
+                                )
                     else:
                         print("Random 無可選樣本，跳過偽標籤產生")
 
@@ -3293,6 +3833,33 @@ def _run_main(save_path):
                 print(f"Unlabeled 資料集大小(開始時): {round_unlabeled_size}")
                 pseudo_ratio = len(round_pseudo_labeled_samples) / max(round_unlabeled_size, 1) * 100 if round_unlabeled_size > 0 else 0
                 print(f"Pseudo-labeling 成功率: {pseudo_ratio:.2f}%")
+                if consistency_enabled:
+                    print(f"Task consistency 檢查數: {consistency_stats['checked']}")
+                    print(f"Task consistency 通過: {consistency_stats['accept']}")
+                    print(f"Task consistency 拒絕: {consistency_stats['reject']}")
+                    if consistency_stats['checked'] > 0:
+                        consistency_accept_ratio = consistency_stats['accept'] / consistency_stats['checked'] * 100
+                        print(f"Task consistency 通過率: {consistency_accept_ratio:.2f}%")
+                elif opt.consistency_pseudo:
+                    print(f"Task consistency 已啟用但本輪未套用 (跳過: {consistency_stats['skip_unavailable']})")
+
+                if consistency_debug_records:
+                    consistency_debug_path = os.path.join(
+                        pseudo_results_dir,
+                        f"consistency_predictions_fold{fold}_round{self_round + 1}.json",
+                    )
+                    with open(consistency_debug_path, "w", encoding="utf-8") as fjson:
+                        json.dump(consistency_debug_records, fjson, ensure_ascii=False, indent=2)
+                    print(f"  consistency 三模型預測已寫入: {consistency_debug_path}")
+
+                if consistency_rejected_records:
+                    rejected_path = os.path.join(
+                        pseudo_results_dir,
+                        f"consistency_rejected_eval_fold{fold}_round{self_round + 1}.json",
+                    )
+                    with open(rejected_path, "w", encoding="utf-8") as fjson:
+                        json.dump(consistency_rejected_records, fjson, ensure_ascii=False, indent=2)
+                    print(f"  consistency 拒絕樣本 GT 評估已寫入: {rejected_path}")
                 
                 # 一次性保存所有pseudo預測結果
                 if all_pseudo_predictions:
@@ -3331,20 +3898,25 @@ def _run_main(save_path):
                         fold=fold,
                         round_idx=self_round,
                         records=pseudo_eval_records,
-                        total_tokens=pseudo_eval_total,
-                        correct_tokens=pseudo_eval_correct,
-                        filtered_total_tokens=pseudo_eval_filtered_total,
-                        filtered_correct_tokens=pseudo_eval_filtered_correct,
+                        total_tokens=pseudo_eval_state['pseudo_eval_total'],
+                        correct_tokens=pseudo_eval_state['pseudo_eval_correct'],
+                        filtered_total_tokens=pseudo_eval_state['pseudo_eval_filtered_total'],
+                        filtered_correct_tokens=pseudo_eval_state['pseudo_eval_filtered_correct'],
                         tokenizer=tokenizer,
                         summary=pseudo_gt_summary,
                     )
-                    if pseudo_eval_total > 0:
-                        pseudo_error_rate = 1.0 - (pseudo_eval_correct / pseudo_eval_total)
+                    if pseudo_eval_state['pseudo_eval_total'] > 0:
+                        pseudo_error_rate = 1.0 - (
+                            pseudo_eval_state['pseudo_eval_correct'] / pseudo_eval_state['pseudo_eval_total']
+                        )
                         print(f"  偽標籤錯誤率 (round {self_round + 1}): {pseudo_error_rate:.4f}")
                     else:
                         print("  偽標籤錯誤率: 無可比較之真實答案")
-                    if pseudo_eval_filtered_total > 0:
-                        filtered_error_rate = 1.0 - (pseudo_eval_filtered_correct / pseudo_eval_filtered_total)
+                    if pseudo_eval_state['pseudo_eval_filtered_total'] > 0:
+                        filtered_error_rate = 1.0 - (
+                            pseudo_eval_state['pseudo_eval_filtered_correct'] /
+                            pseudo_eval_state['pseudo_eval_filtered_total']
+                        )
                         print(f"  偽標籤錯誤率(排除非非无) (round {self_round + 1}): {filtered_error_rate:.4f}")
                     elif evaluate_pseudo:
                         print("  偽標籤錯誤率(排除非非无): 無剩餘可比較資料")
@@ -3603,24 +4175,91 @@ def _run_main(save_path):
             p_emotion, r_emotion, f_emotion, p_cause, r_cause, f_cause, p_pair, r_pair, f_pair = crf_prompt(
                 all_val_logits, all_val_label, all_val_x_bert, all_val_emotion_gt, all_val_cause_gt,
                 all_val_pair_gt, save_path=os.path.join(st_results_dir, f"self_training_val_results_fold{fold}_round{self_round+1}.txt"))
+            if opt.save_val_predictions:
+                # 每一輪都儲存驗證集預測，確保可與 self_training_val_results_fold{fold}_round{round}.txt 一一對應
+                save_mask_predictions(
+                    all_val_logits,
+                    all_val_x_bert,
+                    tokenizer,
+                    NLP_Dataset['val'].doc_id,
+                    fold=fold,
+                    output_dir=st_results_dir,
+                    base_filename=f"self_training_val_text_result_round{self_round+1}",
+                )
             print(f"[Self-training round {self_round+1}] Validation: e_f: {f_emotion:.4f} c_f: {f_cause:.4f} pair_f: {f_pair:.4f}")
-            
-            # 初始化 self-training 的最佳性能追蹤變數
-            if self_round == 0:
-                st_max_f1_pair = -1.0
-                st_max_p_pair = -1.0
-                st_max_r_pair = -1.0
-            
-            # 檢查是否為當前最佳性能，並儲存模型
+
+            # 建立 self-training 專用的子資料夾
+            st_save_dir = os.path.join(save_path, 'self_training_models')
+            if opt.savecheckpoint:
+                os.makedirs(st_save_dir, exist_ok=True)
+                # 每輪都保存三模型快照 (供下一輪 consistency 使用)
+                round_idx = self_round + 1
+                round_emo_path = os.path.join(st_save_dir, f'fold{fold}_round{round_idx}_best_emo.pth')
+                round_cause_path = os.path.join(st_save_dir, f'fold{fold}_round{round_idx}_best_cause.pth')
+                round_pair_path = os.path.join(st_save_dir, f'fold{fold}_round{round_idx}_best_pair.pth')
+                torch.save(model, round_emo_path)
+                torch.save(model, round_cause_path)
+                torch.save(model, round_pair_path)
+
+            # 更新並保存「跨輪全域最佳」三模型
+            if f_emotion > st_max_f1_emotion:
+                st_max_f1_emotion = f_emotion
+                st_best_emo_path = os.path.join(st_save_dir, f'fold{fold}_self_training_best_emo.pth')
+                if opt.savecheckpoint:
+                    torch.save(model, st_best_emo_path)
+                    print(f"   Self-training 最佳 Emotion 模型已儲存: {st_best_emo_path}")
+                metrics_dict = {
+                    "p_emotion": p_emotion,
+                    "r_emotion": r_emotion,
+                    "f_emotion": f_emotion,
+                    "p_cause": p_cause,
+                    "r_cause": r_cause,
+                    "f_cause": f_cause,
+                    "p_pair": p_pair,
+                    "r_pair": r_pair,
+                    "f_pair": f_pair,
+                }
+                write_best_val_checkpoint(
+                    best_val_emo_info_path,
+                    stage=f"self_training_round_{self_round + 1}",
+                    iteration=self_round + 1,
+                    val_loss=st_avg_val_loss,
+                    metrics=metrics_dict,
+                    checkpoint_path=st_best_emo_path if opt.savecheckpoint else ""
+                )
+
+            if f_cause > st_max_f1_cause:
+                st_max_f1_cause = f_cause
+                st_best_cause_path = os.path.join(st_save_dir, f'fold{fold}_self_training_best_cause.pth')
+                if opt.savecheckpoint:
+                    torch.save(model, st_best_cause_path)
+                    print(f"   Self-training 最佳 Cause 模型已儲存: {st_best_cause_path}")
+                metrics_dict = {
+                    "p_emotion": p_emotion,
+                    "r_emotion": r_emotion,
+                    "f_emotion": f_emotion,
+                    "p_cause": p_cause,
+                    "r_cause": r_cause,
+                    "f_cause": f_cause,
+                    "p_pair": p_pair,
+                    "r_pair": r_pair,
+                    "f_pair": f_pair,
+                }
+                write_best_val_checkpoint(
+                    best_val_cause_info_path,
+                    stage=f"self_training_round_{self_round + 1}",
+                    iteration=self_round + 1,
+                    val_loss=st_avg_val_loss,
+                    metrics=metrics_dict,
+                    checkpoint_path=st_best_cause_path if opt.savecheckpoint else ""
+                )
+
             if f_pair > st_max_f1_pair:
                 st_max_f1_pair, st_max_p_pair, st_max_r_pair = f_pair, p_pair, r_pair
-                st_model_path = os.path.join(save_path, 'self_training_models', f'fold{fold}_self_training_best.pth')
+                st_model_path = os.path.join(st_save_dir, f'fold{fold}_self_training_best_pair.pth')
                 if opt.savecheckpoint:
-                    # 建立 self-training 專用的子資料夾
-                    st_save_dir = os.path.dirname(st_model_path)
-                    os.makedirs(st_save_dir, exist_ok=True)
                     torch.save(model, st_model_path)
-                    print(f"   Self-training 最佳模型已儲存: {st_model_path}")
+                    print(f"   Self-training 最佳 Pair 模型已儲存: {st_model_path}")
                     print(f"   當前最佳 pair F1: {st_max_f1_pair:.4f}")
                 metrics_dict = {
                     "p_emotion": p_emotion,
@@ -3634,7 +4273,7 @@ def _run_main(save_path):
                     "f_pair": f_pair,
                 }
                 write_best_val_checkpoint(
-                    best_val_info_path,
+                    best_val_pair_info_path,
                     stage=f"self_training_round_{self_round + 1}",
                     iteration=self_round + 1,
                     val_loss=st_avg_val_loss,
@@ -3647,14 +4286,14 @@ def _run_main(save_path):
         
         # 在測試集上進行評估，輸出與 UECA_CE_val_version.py 相同的紀錄
         if opt.test_model_type == 'self_training':
-            candidate_path = os.path.join(save_path, 'self_training_models', f'fold{fold}_self_training_best.pth')
+            candidate_path = os.path.join(save_path, 'self_training_models', f'fold{fold}_self_training_best_pair.pth')
             if os.path.exists(candidate_path):
                 test_checkpoint_path = candidate_path
             else:
-                test_checkpoint_path = os.path.join(save_path, f'fold{fold}.pth')
+                test_checkpoint_path = os.path.join(save_path, f'fold{fold}_best_pair.pth')
                 print(f"找不到 self-training 模型 {candidate_path}，改用初始監督模型進行測試評估")
         else:
-            test_checkpoint_path = os.path.join(save_path, f'fold{fold}.pth')
+            test_checkpoint_path = os.path.join(save_path, f'fold{fold}_best_pair.pth')
 
         if os.path.exists(test_checkpoint_path):
             test_model = torch.load(test_checkpoint_path, map_location=torch.device('cuda' if use_gpu else 'cpu'))
@@ -3767,7 +4406,7 @@ def _run_main(save_path):
     # 所有 fold 結束，計算總時間
     all_folds_total_time = time.time() - all_folds_start_time
     overall_total_time = time.time() - overall_start_time
-    print(f"\n所有實驗完成！")
+    print(f"\n所有實驗完成!")
     print(f"所有 fold 總執行時間: {all_folds_total_time/60:.1f} 分鐘")
     print(f"程式總執行時間: {overall_total_time/60:.1f} 分鐘")
     print(f"實驗結束時間: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")

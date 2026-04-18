@@ -1,0 +1,68 @@
+======================================================================
+多種子 (Multi-Seed) 實驗結果彙整
+======================================================================
+
+彙整的實驗目錄 (共 3 個):
+  - prompt_ECPE_few_shot_ST_2026_03_23_16_20_22_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul7_nbeta0.1_nm0.6_gamma0.5_st10_ste3_seed42_retain_pseudo_consistency_somc_CE
+  - prompt_ECPE_few_shot_ST_2026_03_23_16_23_08_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul7_nbeta0.1_nm0.6_gamma0.5_st10_ste3_seed20_retain_pseudo_consistency_somc_CE
+  - prompt_ECPE_few_shot_ST_2026_03_23_16_26_25_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul7_nbeta0.1_nm0.6_gamma0.5_st10_ste3_seed60_retain_pseudo_consistency_somc_CE
+
+----------------------------------------------------------------------
+各 Seed 個別數值 (10 折累計 micro):
+----------------------------------------------------------------------
+
+Emotion:
+  P:  seed42: 72.62%  seed20: 71.71%  seed60: 73.67%
+  R:  seed42: 73.64%  seed20: 78.32%  seed60: 74.99%
+  F1: seed42: 73.12%  seed20: 74.87%  seed60: 74.32%
+
+Cause:
+  P:  seed42: 55.84%  seed20: 54.48%  seed60: 54.82%
+  R:  seed42: 53.71%  seed20: 57.66%  seed60: 55.08%
+  F1: seed42: 54.75%  seed20: 56.03%  seed60: 54.95%
+
+Pair (m1):
+  P:  seed42: 55.88%  seed20: 55.74%  seed60: 58.49%
+  R:  seed42: 47.91%  seed20: 52.60%  seed60: 50.07%
+  F1: seed42: 51.59%  seed20: 54.12%  seed60: 53.95%
+
+Pair (m2):
+  P:  seed42: 57.63%  seed20: 58.15%  seed60: 60.25%
+  R:  seed42: 44.63%  seed20: 49.70%  seed60: 46.98%
+  F1: seed42: 50.30%  seed20: 53.59%  seed60: 52.79%
+
+Pair (m3):
+  P:  seed42: 61.16%  seed20: 61.97%  seed60: 63.90%
+  R:  seed42: 37.13%  seed20: 43.69%  seed60: 40.74%
+  F1: seed42: 46.21%  seed20: 51.25%  seed60: 49.76%
+
+----------------------------------------------------------------------
+10 折累計統計結果 (Mean ± Std):
+----------------------------------------------------------------------
+
+Emotion:
+  P (micro):  72.67% ± 0.98%
+  R (micro):  75.65% ± 2.41%
+  F1 (micro): 74.10% ± 0.89%
+
+Cause:
+  P (micro):  55.05% ± 0.71%
+  R (micro):  55.48% ± 2.01%
+  F1 (micro): 55.24% ± 0.69%
+
+Pair (m1):
+  P (micro):  56.70% ± 1.55%
+  R (micro):  50.19% ± 2.35%
+  F1 (micro): 53.22% ± 1.41%
+
+Pair (m2):
+  P (micro):  58.68% ± 1.39%
+  R (micro):  47.10% ± 2.54%
+  F1 (micro): 52.23% ± 1.72%
+
+Pair (m3):
+  P (micro):  62.34% ± 1.41%
+  R (micro):  40.52% ± 3.29%
+  F1 (micro): 49.07% ± 2.59%
+
+======================================================================

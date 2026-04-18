@@ -1,0 +1,246 @@
+指令說明 (plot_val_pair_f1_per_round.py, metric=precision)
+====================================================================
+
+一、指令
+--------------------------------------------------------------------
+python utils/plot_val_pair_f1_per_round.py \
+  --summary-files $(ls results_ep_split10_t1te1v1_u7_disjoint/*_CE_summary.txt | grep -v consistency | grep -v '_EC_summary' | grep -v '_st0_') \
+  results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_th0.9_maskemotion_gamma0.5_st10_ste3_retain_pseudo_consistency_CE_summary.txt \
+  --experiments-root ep_split10_t1te1v1_u7_disjoint \
+  --no-std-band \
+  --no-individual-seeds \
+  --metric precision \
+  --output-name val_pair_per_round
+
+
+二、這指令在做什麼?
+--------------------------------------------------------------------
+此指令會：
+1) 讀取多個 *_CE_summary.txt (每個 summary 代表一個方法群組)
+2) 從每個 summary 解析出多個實驗資料夾（通常是不同 seed）
+3) 對每個 seed、每個 round（Init + R1~R10），收集 fold1~fold10 的驗證集 Pair Precision
+4) 先做「同一個 seed 的 10 折平均」
+5) 再做「同一個群組內，多個 seed 的平均曲線」
+6) 畫成折線圖 (本指令關閉了 seed 淡色線、也關閉了 std 帶)
+7) 同步輸出 PNG、CSV、TXT 報告
+
+
+三、Shell 層先做的事: --summary-files 展開
+--------------------------------------------------------------------
+--summary-files 後面的 $(...) 是 shell command substitution，會先被展開成「一串檔案路徑」
+
+$(ls ... | grep -v consistency | grep -v '_EC_summary' | grep -v '_st0_')
+含義：
+- 先列出 results_ep_split10_t1te1v1_u7_disjoint/*_CE_summary.txt
+- 排除檔名含 consistency 的 summary
+- 排除檔名含 _EC_summary 的 summary (只留 CE 這批)
+- 排除檔名含 _st0_ 的 summary (通常代表無自訓練)
+
+最後在後面手動再加上一個 consistency 的 summary 路徑，
+因此最終 summary-files = 「多個 baseline/變體 + 1 個 consistency」
+
+
+四、程式如何從 summary 變成實驗資料夾
+--------------------------------------------------------------------
+每個 summary 檔會逐行找這種格式: 
+- prompt_ECPE_few_shot_ST_xxx
+
+程式會把這些名稱視為 experiments-root 底下的子資料夾:
+experiments-root / prompt_ECPE_few_shot_ST_xxx
+
+實驗結果的資料夾路徑:
+--experiments-root ep_split10_t1te1v1_u7_disjoint
+所以每個實驗實際路徑會是:
+ep_split10_t1te1v1_u7_disjoint/prompt_ECPE_few_shot_ST_xxx
+
+
+五、metric=precision 時，讀哪個檔案、取哪個值
+--------------------------------------------------------------------
+1) Round 0 (Init)
+   檔案位置:
+   init_supervised_metrics/fold{fold}_init_supervised_metrics.txt
+
+   讀取規則（precision）：
+   解析行：Pair P: [0.5271739130...]
+   取中括號內數值作為該 fold 的 Pair Precision
+
+2) Round 1~N (自訓練)
+   檔案位置:
+   self_training_results_*/self_training_val_results_fold{fold}_round{r}.txt
+
+   讀取規則 (precision):
+   找所有符合:
+   Precision (Emotion, Cause, Pair): e, c, p
+   取「最後一筆」的第三個值 p (也就是 Pair Precision)
+
+
+六、預設參數 (你這條指令未顯式指定)
+--------------------------------------------------------------------
+因你未帶下列參數，程式使用預設值:
+- fold-start = 1
+- fold-end   = 10
+- rounds     = 10
+- output-dir = png
+
+所以每個 seed 會計算 11 個點: Init + R1~R10
+每個點會嘗試聚合 fold1~fold10
+
+
+七、核心計算公式
+--------------------------------------------------------------------
+記號:
+- g: 群組 (對應一個 summary)
+- s: seed
+- r: round (0..10)
+- f: fold (1..10)
+- x(g,s,r,f): 從檔案解析出的 Pair Precision (若缺檔/失敗則缺值)
+
+步驟 A: 同 seed、同 round 的 10 折平均
+  seed_round_mean(g,s,r) = mean_f x(g,s,r,f)
+  (只平均有讀到的 fold；若全部缺值則該點為 NaN)
+
+步驟 B: 同群組、同 round 的跨 seed 平均 (用於主折線)
+  group_round_mean(g,r) = nanmean_s seed_round_mean(g,s,r)
+
+步驟 C: 同群組、同 round 的跨 seed 標準差 (本次不畫)
+  group_round_std(g,r) = nanstd_s seed_round_mean(g,s,r)
+
+注意: 
+- 圖上顯示前，數值會乘 100 轉成百分比
+- mean/std 計算都是對 seed 維度做
+
+
+八、--no-individual-seeds 與 --no-std-band 的實際影響
+--------------------------------------------------------------------
+- --no-individual-seeds
+  不畫每個 seed 的淡色虛線
+  仍然會計算 seed 資料，因為群組平均需要它
+
+- --no-std-band
+  不畫 mean ± std 的陰影帶
+  主線 (group mean) 仍會照常畫出
+
+
+九、標註最高點/第二高點/最低點如何算
+--------------------------------------------------------------------
+對每個群組的 group_round_mean(g,r) (百分比序列)做:
+- max：最高點
+- second max: 排序後第二高
+- min: 最低點
+
+並在圖上標文字 (例如 53.5%)
+
+
+十、輸出檔名規則 (你這條是 precision)
+--------------------------------------------------------------------
+你指定: --output-name val_pair_per_round
+且 metric=precision
+
+程式規則:
+- metric=f1        -> 檔名 suffix = ""
+- metric=precision -> 檔名 suffix = "_precision"
+- metric=recall    -> 檔名 suffix = "_recall"
+
+因此本次輸出 (在 output-dir=png):
+- png/val_pair_per_round_precision.png
+- png/val_pair_per_round_precision.csv
+- png/val_pair_per_round_precision.txt
+
+
+十一、CSV 與 TXT 報告內容在記什麼
+--------------------------------------------------------------------
+1) CSV
+   每列是: group, seed, round, fold_avg_pair_f1
+   欄名雖寫 fold_avg_pair_f1，但在 metric=precision 時，實際放的是 fold_avg_pair_precision
+   (這是欄位命名沿用舊名稱，不影響值本身)
+
+2) TXT
+   會列每個群組在 Init~R10 的各 seed 值、均值、標準差，並標出最佳 round
+
+
+十二、可能造成你圖上數值差異的常見原因
+--------------------------------------------------------------------
+1) summary-files 的檔案集合不同 (多/少一個 summary)
+2) summary 內列出的 prompt 實驗資料夾清單不同
+3) 某些 fold/round 檔案缺失，導致該點用較少 fold 計算
+4) 使用了不同 metric (precision / recall / f1)
+5) 是否有顯式指定 --fold-start/--fold-end/--rounds
+
+
+十三、一句話總結
+--------------------------------------------------------------------
+這指令是在「每個方法群組內，先把每個 seed 的 Pair Precision 做 10 折平均，再跨 seed 取平均」，
+最後繪出驗證集隨 Init~R10 變化的群組主曲線 (你這條設定不畫 seed 細線與 std 帶)
+
+
+十四、每個步驟對應到的程式碼位置
+--------------------------------------------------------------------
+目標檔案：utils/plot_val_pair_f1_per_round.py
+
+1) 讀取命令列參數（--summary-files、--metric、--output-name...）
+  - parse_args(): 第550行
+  - --metric 的 choices 設定（f1/precision/recall/all）: 第586~590行
+  - --output-name 參數: 第581~585行
+
+2) Shell 展開後的 summary 檔如何被逐一處理
+  - run_for_metric(): 第616行
+  - for summary_path_str in args.summary_files: 第622行
+  - summary 檔存在性檢查: 第624~625行
+
+3) 從 summary 解析出 prompt_ECPE_few_shot_ST_* 實驗資料夾
+  - read_experiment_names_from_summary(): 第59行
+  - 正則擷取「- prompt_ECPE_few_shot_ST_...」: 第64~67行
+  - 在 run_for_metric() 中呼叫解析: 第627行
+  - experiments-root + 實驗名組成完整路徑: 第631~636行
+
+4) metric=precision 時讀哪裡、抓哪個欄位
+  - Round0 檔案解析函式 parse_init_pair_metric(): 第140行
+  - precision 讀取正則（Pair P）: 第154~156行
+  - Round1~N 檔案解析函式 parse_val_pair_metric(): 第168行
+  - precision 讀取正則（Precision (Emotion, Cause, Pair)）: 第183~184行
+  - 取最後一筆結果的 Pair 值（第三個欄位）: 第191~194行
+
+5) 每個 seed、每個 round 收集 fold1~fold10 並做 10 折平均
+  - collect_group_data(): 第200行
+  - rounds_list = [0..N]: 第228行
+  - 逐 round、逐 fold 收集數值: 第232~240行
+  - Round0 呼叫 parse_init_pair_metric(): 第236行
+  - Round1~N 呼叫 parse_val_pair_metric(): 第239行
+  - fold 平均 np.mean(fold_vals): 第243行
+  - 若無值則記 NaN: 第245行
+
+6) 同群組跨 seed 做平均/標準差（畫主曲線）
+  - plot_groups(): 第323行
+  - 組成 matrix（seed x round）: 第353行
+  - group mean: np.nanmean(matrix, axis=0) * 100: 第369行
+  - group std: np.nanstd(matrix, axis=0) * 100: 第370行
+
+7) --no-individual-seeds 與 --no-std-band 的實際作用
+  - 個別 seed 線條開關（show_individual_seeds）: 第356行
+  - std band 開關（show_std_band）: 第379行
+  - run_for_metric() 將參數反映到繪圖函式:
+    show_individual_seeds=not args.no_individual_seeds: 第658行
+    show_std_band=not args.no_std_band: 第659行
+
+8) 最高點/第二高點/最低點標註
+  - max/min index: 第391~392行
+  - second max index: 第406~409行
+  - annotate 最高/第二高/最低: 第415~443行
+
+9) precision 標題與 y 軸名稱來源
+  - METRIC_DISPLAY['precision']: 第611行
+  - run_for_metric() 取對應標題: 第618~619行
+
+10) 輸出檔名規則 (_precision 後綴)與輸出格式
+   - suffix 規則: 第648行
+   - base 檔名組合: 第649行
+   - PNG 輸出: 第655行
+   - CSV 輸出: 第661行
+   - TXT 輸出: 第667行
+
+11) metric 執行入口 (precision 或 all)
+   - main(): 第674行
+   - 若 args.metric == 'all' -> 跑 f1/precision/recall: 第697~700行
+   - 逐 metric 執行 run_for_metric(): 第702~706行
+
+

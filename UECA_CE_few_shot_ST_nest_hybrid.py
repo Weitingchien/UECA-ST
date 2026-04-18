@@ -1022,8 +1022,14 @@ parser.add_argument('--test_model_type', type=str, default='initial', choices=['
                     help='which model to test: initial (fold{i}.pth) or self_training (self_training_models/fold{i}_self_training_best.pth)')
 parser.add_argument('--log_pseudo_quality', action='store_true',
                     help='compare pseudo labels against ground truth when available and persist error statistics')
-parser.add_argument('--pseudo_selector', type=str, default='threshold', choices=['threshold', 'nest', 'random'],
-                    help='偽標籤選擇策略: 使用信心度閥值、NeST 選擇器或隨機選擇')
+parser.add_argument('--pseudo_selector', type=str, default='threshold', choices=['threshold', 'nest', 'random', 'hybrid'],
+                    help='偽標籤選擇策略: 使用信心度閥值、NeST 選擇器、隨機選擇或混合模式(Hybrid)')
+parser.add_argument('--hybrid_switch_round', type=int, default=5,
+                    help='Hybrid 模式下，切換選擇器的輪次分界點')
+parser.add_argument('--hybrid_reverse', action='store_true',
+                    help='反轉 Hybrid 策略順序: 前期使用 NeST，後期切換為 Threshold (預設為 False: 前期 Threshold 後期 NeST)')
+parser.add_argument('--hybrid_alternating', action='store_true',
+                    help='交替 Hybrid 策略：奇數輪使用 Threshold，偶數輪使用 NeST (預設為 False)')
 parser.add_argument('--nest_k', type=int, default=5,
                     help='NeST 選擇器使用的鄰域數量 (KNN k 值)')
 parser.add_argument('--nest_beta', type=float, default=0.1,
@@ -1039,7 +1045,7 @@ parser.add_argument('--knn_embedding_mode', type=str, default='cls',
                     help='KNN 使用的 embedding 類型: cls=傳統[CLS], emotion_clause=情緒子句聚合, cause_clause=原因子句聚合, emotion_clause_mask=情緒子句+[MASK]_e平均, cause_clause_mask=原因子句+[MASK]_c平均')
 parser.add_argument('--self_training_eps', type=float, default=0.6,
                     help='NeST 選擇器中的距離穩定項 (保留舊參數以相容既有腳本)')
-parser.add_argument('--nest_loss_mode', type=str, default='standard',
+parser.add_argument('--nest_loss_mode', type=str, default='nest',
                     choices=['standard', 'nest'],
                     help='NeST loss 計算模式: standard=所有偽標籤都計入, nest=只有信心>γ才計入')
 parser.add_argument('--nest_loss_threshold', type=float, default=0.9,
@@ -1064,7 +1070,22 @@ if opt.save_path == 'prompt_ECPE_few_shot_ST' and not opt.test_only:
     retain_pseudo_str = "retain_pseudo" if opt.retain_pseudo_in_unlabeled else "remove_pseudo"
     
     # 根據偽標籤選擇策略決定顯示的模式
-    if opt.pseudo_selector == 'nest':
+    if opt.pseudo_selector == 'hybrid':
+        if opt.hybrid_alternating:
+            selector_str = "hybrid_alt"
+        else:
+            rev_str = "rev_" if opt.hybrid_reverse else ""
+            selector_str = f"hybrid_{rev_str}switch{opt.hybrid_switch_round}"
+        # Hybrid 模式下，NeST 參數也需要記錄
+        knn_emb_str = f"_knn{opt.knn_embedding_mode}" if opt.knn_embedding_mode != 'cls' else ""
+        nest_str = f"_nest_k{opt.nest_k}_{opt.nest_divergence_mode}{knn_emb_str}"
+        selector_str += nest_str
+        
+        # 混合模式初期使用 threshold，後期使用 nest multiplier
+        threshold_str = f"th{opt.threshold}_"
+        nest_multiplier_str = f"_nestmul{opt.nest_multiplier:g}".replace(".", "p")
+        nest_params_str = f"_nbeta{opt.nest_beta}_nm{opt.nest_m}"
+    elif opt.pseudo_selector == 'nest':
         # 加入 knn_embedding_mode 以區分不同 embedding 模式 (cls, emotion_clause, cause_clause)
         knn_emb_str = f"_knn{opt.knn_embedding_mode}" if opt.knn_embedding_mode != 'cls' else ""
         selector_str = f"nest_k{opt.nest_k}_{opt.nest_divergence_mode}{knn_emb_str}"
@@ -1154,7 +1175,22 @@ def generate_experiment_folder_name(opt, bert_path):
     model_name = os.path.basename(bert_path.rstrip('/'))  # 移除末尾的斜線並取得最後一個路徑部分
     
     # 根據偽標籤選擇策略決定顯示的模式
-    if opt.pseudo_selector == 'nest':
+    if opt.pseudo_selector == 'hybrid':
+        if opt.hybrid_alternating:
+            selector_str = "hybrid_alt"
+        else:
+            rev_str = "rev_" if opt.hybrid_reverse else ""
+            selector_str = f"hybrid_{rev_str}switch{opt.hybrid_switch_round}"
+        # Hybrid 模式下，NeST 參數也需要記錄
+        knn_emb_str = f"_knn{opt.knn_embedding_mode}" if opt.knn_embedding_mode != 'cls' else ""
+        nest_str = f"_nest_k{opt.nest_k}_{opt.nest_divergence_mode}{knn_emb_str}"
+        selector_str += nest_str
+        
+        # 混合模式初期使用 threshold，後期使用 nest multiplier
+        threshold_str = f"th{opt.threshold}_"
+        nest_multiplier_str = f"_nestmul{opt.nest_multiplier:g}".replace(".", "p")
+        nest_params_str = f"_nbeta{opt.nest_beta}_nm{opt.nest_m}"
+    elif opt.pseudo_selector == 'nest':
         # 加入 knn_embedding_mode 以區分不同 embedding 模式 (cls, emotion_clause, cause_clause)
         knn_emb_str = f"_knn{opt.knn_embedding_mode}" if opt.knn_embedding_mode != 'cls' else ""
         selector_str = f"nest_k{opt.nest_k}_{opt.nest_divergence_mode}{knn_emb_str}"
@@ -2444,6 +2480,34 @@ def _run_main(save_path):
         
         for self_round in range(opt.self_training_rounds):
             round_start_time = time.time()  # 記錄每輪開始時間
+            
+            # Hybrid 策略: 決定本輪使用的選擇器
+            current_selector = opt.pseudo_selector
+            if opt.pseudo_selector == 'hybrid':
+                if opt.hybrid_alternating:
+                    # 交替模式: 奇數輪 Threshold，偶數輪 NeST (輪次從 1 開始計算)
+                    if (self_round + 1) % 2 == 1:  # 奇數輪 (R1, R3, R5, ...)
+                        current_selector = 'threshold'
+                        print(f"Hybrid Strategy (Alternating): Round {self_round+1} 使用 Threshold 模式 (奇數輪)")
+                    else:  # 偶數輪 (R2, R4, R6, ...)
+                        current_selector = 'nest'
+                        print(f"Hybrid Strategy (Alternating): Round {self_round+1} 使用 NeST 模式 (偶數輪)")
+                elif opt.hybrid_reverse:
+                    # 反轉模式: 前期 NeST，後期 Threshold
+                    if self_round < opt.hybrid_switch_round:
+                        current_selector = 'nest'
+                        print(f"Hybrid Strategy (Reverse): Round {self_round+1} 使用 NeST 模式 (尚未達到切換輪次 {opt.hybrid_switch_round})")
+                    else:
+                        current_selector = 'threshold'
+                        print(f"Hybrid Strategy (Reverse): Round {self_round+1} 切換為 Threshold 模式")
+                else:
+                    # 正常模式: 前期 Threshold，後期 NeST
+                    if self_round < opt.hybrid_switch_round:
+                        current_selector = 'threshold'
+                        print(f"Hybrid Strategy: Round {self_round+1} 使用 Threshold 模式 (尚未達到切換輪次 {opt.hybrid_switch_round})")
+                    else:
+                        current_selector = 'nest'
+                        print(f"Hybrid Strategy: Round {self_round+1} 切換為 NeST 模式")
             print(f"=== Self-training round {self_round+1} / {opt.self_training_rounds} ===")
             print(f"  Round {self_round+1} 開始時間: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
             if unlabeled_loader is None or len(unlabeled_dataset) == 0:
@@ -2612,7 +2676,7 @@ def _run_main(save_path):
                     # 將此樣本的日誌項目加入列表
                     pseudo_logging_entries.append(pseudo_entry)
 
-                if opt.pseudo_selector == 'threshold':
+                if current_selector == 'threshold':
                     mask_token_id = tokenizer.mask_token_id
                     threshold = opt.threshold
                     apply_emotion_threshold = opt.mask_threshold_mode in ('emotion', 'both', 'all')
@@ -2669,26 +2733,26 @@ def _run_main(save_path):
                                     pseudo_label.append(pred_token_id_val)
                                     cause_predictions[count_sentence] = (pred_token_id_val == 3221)
                                 else:  # mask_type == 2 (pair position) - 第3個[MASK]，預測「配對句編號」
-                                    if cause_predictions.get(count_sentence, False):  # 如果該子句被預測為「原因句」
+                                    if cause_predictions.get(count_sentence, False): # 如果該子句被預測為「原因句」
                                         # 建立候選配對編號列表 (在 window_size 範圍內的句子編號)
                                         case = [label_index[k] for k in range(
                                             max(0, -opt.window_size + count_sentence - 1),
                                             min(75, opt.window_size + count_sentence)
                                         )]
-                                        case.append(3187)  # 加入 "无" (無配對) 的 token id
-                                        candidate_logits = logits[i, pos_idx, case]  # 取得模型對這些候選的 logits
+                                        case.append(3187) # 加入 "无" (無配對) 的 token id
+                                        candidate_logits = logits[i, pos_idx, case] # 取得模型對這些候選的 logits
                                         # 先對 logits 做 softmax 轉成機率，然後取最大機率值和索引
                                         max_prob, selected_idx = torch.max(F.softmax(candidate_logits, dim=-1), dim=-1)
-                                        pred_token_id = case[selected_idx.item()]  # 取得預測的 token id
+                                        pred_token_id = case[selected_idx.item()] # 取得預測的 token id
                                         # all 模式: pair 位置也需檢查閾值
-                                        # 【新增】如果是 'all' 模式，檢查 pair 位置的信心度
+                                        # 新增】如果是 'all' 模式，檢查 pair 位置的信心度
                                         if apply_pair_threshold and max_prob.item() < threshold:
                                             batch_pair_filtered += 1  # 統計被 pair 閾值過濾的樣本
-                                            all_pass = False  # 信心度不足，這個樣本不通過
-                                            break  # 跳出迴圈，不繼續處理這個樣本
-                                        pseudo_label.append(pred_token_id if isinstance(pred_token_id, int) else pred_token_id.item())  # 通過檢查，加入偽標籤
+                                            all_pass = False # 信心度不足，這個樣本不通過
+                                            break # 跳出迴圈，不繼續處理這個樣本
+                                        pseudo_label.append(pred_token_id if isinstance(pred_token_id, int) else pred_token_id.item()) # 通過檢查，加入偽標籤
                                     else:
-                                        pseudo_label.append(3187)  # 不是原因句 → 直接填 "无"
+                                        pseudo_label.append(3187) # 不是原因句 → 直接填 "无"
 
                             if all_pass and mask_positions.size > 0:
                                 doc_global_idx = batch_start_idx + i
@@ -2696,6 +2760,7 @@ def _run_main(save_path):
                                 append_pseudo_sample(doc_id, batch_cpu[i], pseudo_label)
                                 batch_selected += 1
 
+                        # 輸出本 batch 的統計資訊
                         if apply_pair_threshold:
                             print(f"本 batch 收集到 {batch_selected} 筆 pseudo-labeled 樣本 (閥值: {threshold}, 模式: {opt.mask_threshold_mode}, pair閾值過濾: {batch_pair_filtered} 筆)")
                         else:
@@ -2706,7 +2771,7 @@ def _run_main(save_path):
                             torch.cuda.empty_cache()
                         del logits
 
-                elif opt.pseudo_selector == 'nest':  # [AAAI 2023] NeST
+                elif current_selector == 'nest':  # [AAAI 2023] NeST
                     # 1. 收集有標註資料集的統計資訊 (特徵向量、情緒標籤、原因標籤、情緒句分佈)
                     # 取得有標註資料集的所有 doc_id 列表，用於 debug 
                     labeled_doc_ids = [NLP_Dataset['train'].doc_id[i] for i in range(len(NLP_Dataset['train']))]
@@ -3245,7 +3310,7 @@ def _run_main(save_path):
                     else:
                         print("NeST 無可選樣本，跳過偽標籤產生")
 
-                elif opt.pseudo_selector == 'random':  # 隨機選擇策略
+                elif current_selector == 'random':  # 隨機選擇策略
                     # 1. 收集未標籤資料的偽標籤 (仍需模型推論來產生偽標籤)
                     unlabeled_doc_ids = [unlabeled_dataset.doc_id[i] for i in range(len(unlabeled_dataset))]
                     _, _, _, _, _, all_pseudo_tokens = collect_unlabeled_statistics(

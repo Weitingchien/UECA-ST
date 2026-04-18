@@ -1,0 +1,97 @@
+Analysis Results:
+
+Analyzing dataset: split10_home_train9_test1_disjoint
+============================================================
+File: fold1_test.json
+  Total Docs: 75
+  Single-Pair Docs: 63 (84.0%)
+  Emotion Distribution (Single Pair Only):
+    happiness: 19
+    sadness: 16
+    anger: 11
+    fear: 9
+    disgust: 8
+----------------------------------------
+File: fold1_train.json
+  Total Docs: 671
+  Single-Pair Docs: 585 (87.2%)
+  Emotion Distribution (Single Pair Only):
+    sadness: 188
+    happiness: 154
+    fear: 86
+    anger: 85
+    disgust: 49
+    surprise: 23
+----------------------------------------
+Skipping fold1_unlabeled.json (not found)
+Skipping fold1_val.json (not found)
+Summary for split10_home_train9_test1_disjoint
+  Total Docs Aggregated: 746
+  Total Single-Pair Docs: 648 (86.9%)
+  Overall Emotion Distribution (Single Pair Only):
+    sadness: 204 (31.5%)
+    happiness: 173 (26.7%)
+    anger: 96 (14.8%)
+    fear: 95 (14.7%)
+    disgust: 57 (8.8%)
+    surprise: 23 (3.5%)
+
+
+
+Analyzing dataset: split10_home_train1_test1_val1_unlabeled7_disjoint
+============================================================
+File: fold1_test.json
+  Total Docs: 75
+  Single-Pair Docs: 63 (84.0%)
+  Emotion Distribution (Single Pair Only):
+    happiness: 19
+    sadness: 16
+    anger: 11
+    fear: 9
+    disgust: 8
+----------------------------------------
+File: fold1_train.json
+  Total Docs: 75
+  Single-Pair Docs: 66 (88.0%)
+  Emotion Distribution (Single Pair Only):
+    sadness: 26
+    happiness: 15
+    anger: 11
+    disgust: 6
+    surprise: 4
+    fear: 4
+----------------------------------------
+File: fold1_unlabeled.json
+  Total Docs: 521
+  Single-Pair Docs: 462 (88.7%)
+  Emotion Distribution (Single Pair Only):
+    sadness: 141
+    happiness: 127
+    fear: 73
+    anger: 68
+    disgust: 36
+    surprise: 17
+----------------------------------------
+File: fold1_val.json
+  Total Docs: 75
+  Single-Pair Docs: 57 (76.0%)
+  Emotion Distribution (Single Pair Only):
+    sadness: 21
+    happiness: 12
+    fear: 9
+    disgust: 7
+    anger: 6
+    surprise: 2
+----------------------------------------
+Summary for split10_home_train1_test1_val1_unlabeled7_disjoint
+  Total Docs Aggregated: 746
+  Total Single-Pair Docs: 648 (86.9%)
+  Overall Emotion Distribution (Single Pair Only):
+    sadness: 204 (31.5%)
+    happiness: 173 (26.7%)
+    anger: 96 (14.8%)
+    fear: 95 (14.7%)
+    disgust: 57 (8.8%)
+    surprise: 23 (3.5%)
+
+

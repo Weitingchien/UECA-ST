@@ -241,8 +241,7 @@ def _compute_emotion_clause_distribution(logits, input_ids, mask_token_id, yes_t
     計算「被預測為情緒句」的子句的情緒分佈平均值
     
     用途：針對 NeST 的 divergence_mode='emotion_clause' 模式，
-         只取模型預測為情緒句 (P(是) > P(非)) 的子句來計算情緒分佈，
-         這樣可以更精確地衡量模型對情緒預測的可信度。
+         只取模型預測為情緒句 (P(是) > P(非)) 的子句來計算情緒分佈
     
     參數說明：
         logits: shape (512, vocab_size) - 模型對每個位置的預測機率 (已做 softmax)
@@ -423,9 +422,9 @@ def _compute_cause_clause_distribution(logits, input_ids, mask_token_id, yes_tok
 
 def collect_labeled_statistics(model, dataloader, tokenizer, device, debug=False, debug_num_docs=3, doc_ids=None, pairs_list=None, knn_embedding_mode='cls', return_embedding_info=False):
     """
-    蓒集有標籤資料的 embedding 向量與情緒/原因的 (是/非) 機率分佈
+    蒐集有標註資料的嵌入向量與情緒/原因的 (是/非) 機率分佈
     
-    用途：為 NeST 演算法準備有標籤樣本的特徵與標籤分佈，作為 KNN 搜尋的索引基礎
+    用途：為 NeST 準備有標註樣本的特徵與標籤分佈，作為 KNN 搜尋的索引
     
     參數：
         model: BERT 模型
@@ -474,7 +473,7 @@ def collect_labeled_statistics(model, dataloader, tokenizer, device, debug=False
             
             # 執行前向傳播取得 logits
             _, logits = model(x_device, labels=None)
-            probs = F.softmax(logits, dim=-1)  # 保持為 tensor 以便重用
+            probs = F.softmax(logits, dim=-1) 
             probs_np = probs.cpu().numpy()
             
             # 根據 knn_embedding_mode 選擇 embedding
@@ -587,9 +586,9 @@ def collect_labeled_statistics(model, dataloader, tokenizer, device, debug=False
 
 def collect_unlabeled_statistics(model, dataloader, tokenizer, device, window_size, debug=False, debug_num_docs=3, doc_ids=None, knn_embedding_mode='cls', return_embedding_info=False):
     """
-    蓒集未標籤資料的 embedding 向量、模型預測的情緒/原因機率分佈，以及偽標籤 token 序列
+    蒐集未標註資料的 embedding 向量、模型預測的情緒/原因機率分佈，以及偽標籤 token 序列
     
-    用途：為 NeST 演算法準備未標籤樣本的特徵與預測分佈，同時產生偽標籤避免重複推論
+    用途：為 NeST 準備未標籤樣本的特徵與預測分佈，同時產生偽標籤避免重複推論
     
     參數：
         knn_embedding_mode: 'cls'=使用[CLS], 'emotion_clause'/'cause_clause'=使用子句embedding
@@ -789,7 +788,7 @@ def is_emotion_or_cause_clause(probs, mask_positions, mode, yes_token_id, no_tok
     Args:
         probs: 單個文檔的 softmax 機率，shape (512, vocab_size)
         mask_positions: 該子句的 3 個 [MASK] 位置 (emotion, cause, pair)
-        mode: 'emotion_clause' 或 'cause_clause'
+        mode: 'emotion_clause', 'cause_clause', 'emotion_clause_mask', 'cause_clause_mask'
         yes_token_id: 「是」的 token id
         no_token_id: 「非」的 token id
     
@@ -878,7 +877,7 @@ def compute_nest_threshold_loss(model, x_bert, mask_label, threshold, use_gpu):
 
 def compute_clause_embeddings(hidden_states, input_ids, probs, mode, tokenizer, return_info=False):
     """
-    計算子句級別的 embedding (核心函數，可被 prompt_bert 和 collect_*_statistics 重用)
+    計算子句級別的嵌入向量 (核心函數，可被 prompt_bert 和 collect_*_statistics 重用)
     
     Args:
         hidden_states: BERT 最後一層輸出，shape (batch, 512, 768)
@@ -1013,11 +1012,10 @@ parser.add_argument(
     '--mask_threshold_mode',
     type=str,
     default='both',
-    choices=['emotion', 'cause', 'both', 'or'],
-    help='which [MASK] positions must satisfy the confidence threshold: emotion-only, cause-only, both (default), or either emotion/cause'
+    choices=['emotion', 'cause', 'both', 'or', 'all'],
+    help='which [MASK] positions must satisfy the confidence threshold: emotion-only, cause-only, both (emotion+cause), or (emotion or cause), all (emotion+cause+pair)'
 )
-parser.add_argument('--gamma', type=float, default=1.0, help='weight for pseudo-labeled loss')
-parser.add_argument('--lambda_reg', type=float, default=1e-4, help='L2 regularization weight')
+parser.add_argument('--gamma', type=float, default=0.5, help='偽標籤 loss 的權重 (對應論文的 λ，預設 0.5)')
 parser.add_argument('--self_training_rounds', type=int, default=10,help='number of self-training rounds')
 parser.add_argument('--st_training_epochs', type=int, default=3, help='number of epochs to train in each self-training round')
 parser.add_argument('--test_model_type', type=str, default='initial', choices=['initial', 'self_training'], 
@@ -1059,9 +1057,8 @@ if opt.save_path == 'prompt_ECPE_few_shot_ST' and not opt.test_only:
     # 生成時間戳記
     timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     
-    # 格式化學習率和正則化參數
+    # 格式化學習率
     lr_str = f"{opt.learning_rate:.0e}".replace("e-0", "e-").replace("e+0", "e+")
-    lambda_str = f"{opt.lambda_reg:.0e}".replace("e-0", "e-").replace("e+0", "e+")
     
     # 生成參數化的 save_path
     retain_pseudo_str = "retain_pseudo" if opt.retain_pseudo_in_unlabeled else "remove_pseudo"
@@ -1088,11 +1085,11 @@ if opt.save_path == 'prompt_ECPE_few_shot_ST' and not opt.test_only:
         threshold_str = f"th{opt.threshold}_"
         nest_multiplier_str = ""  # threshold 模式下不顯示 nest_multiplier
         nest_params_str = ""  # threshold 模式不顯示 nest 參數
-    
+
     # 生成 nest_loss_mode 字串 (只有 nest 模式才顯示)
     nlm_str = f"_nlm{opt.nest_loss_mode}" if opt.nest_loss_mode == 'nest' else ""
-
-    # 從 dataset 路徑提取簡短名稱（移除尾部斜線後取最後一個路徑部分）
+    
+    # 從 dataset 路徑提取簡短名稱 (移除尾部斜線後取最後一個路徑部分)
     dataset_name = os.path.basename(opt.dataset.rstrip('/'))
     # 生成 dataset 簡短名稱作為父目錄 (將 train/test/val/unlabeled 縮寫為 t/te/v/u)
     dataset_short = dataset_name.replace('train', 't').replace('_test', 'te').replace('_val', 'v').replace('unlabeled', 'u')
@@ -1134,9 +1131,10 @@ if opt.save_path == 'prompt_ECPE_few_shot_ST' and not opt.test_only:
 
     folder_components.append(f"seed{opt.seed}")
 
-    if retain_pseudo_str: folder_components.append(retain_pseudo_str)
+    if retain_pseudo_str: folder_components.append(retain_pseudo_str) # retain_pseudo_str 本身不含底線
 
-    folder_components.append("EC")
+    folder_components.append("v2")
+    folder_components.append("CE")
 
     folder_name = "_".join(folder_components)
     
@@ -1149,8 +1147,6 @@ def generate_experiment_folder_name(opt, bert_path):
     # 格式化學習率（避免科學記號造成的問題）
     lr_str = f"{opt.learning_rate:.0e}".replace("e-0", "e-").replace("e+0", "e+")
     
-    # 格式化 lambda_reg
-    lambda_str = f"{opt.lambda_reg:.0e}".replace("e-0", "e-").replace("e+0", "e+")
     
     # 生成時間戳記 (YYYY_MM_DD_HH_MM_SS)
     timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
@@ -1181,21 +1177,45 @@ def generate_experiment_folder_name(opt, bert_path):
         nest_multiplier_str = ""  # threshold 模式下不顯示 nest_multiplier
         nest_params_str = ""  # threshold 模式不顯示 nest 參數
     
-    # 生成 nest_loss_mode 字串 (只有 nest 模式才顯示)
-    nlm_str = f"_nlm{opt.nest_loss_mode}" if opt.nest_loss_mode == 'nest' else ""
-
     # 從 dataset 路徑提取簡短名稱（移除尾部斜線後取最後一個路徑部分）
     dataset_name = os.path.basename(opt.dataset.rstrip('/'))
+    # 生成 dataset 簡短名稱作為父目錄 (將 train/test/val/unlabeled 縮寫為 t/te/v/u)
+    dataset_short = dataset_name.replace('train', 't').replace('test', 'te').replace('val', 'v').replace('unlabeled', 'u')
+    parent_dir = f"ep_{dataset_short}"
     
-    folder_name = (
-        f"UECA-EC_ST_{timestamp}_{dataset_name}_f{opt.start_fold}-{opt.end_fold}_"
-        f"i{opt.training_iter}_lr{lr_str}_bs{opt.batch_size}_"
-        f"wd{opt.weight_decay}_"
-        f"{model_name}_{threshold_str}{selector_str}"
-        f"{nest_multiplier_str}_gamma{opt.gamma}_reg{lambda_str}_st{opt.self_training_rounds}_"
-        f"ste{opt.st_training_epochs}_seed{opt.seed}_test_model_type_{opt.test_model_type}{nlm_str}"
-    )
-    return folder_name
+    # 生成 nest_loss_mode 字串 (只有 nest 模式才顯示)
+    nlm_str = f"_nlm{opt.nest_loss_mode}" if opt.nest_loss_mode == 'nest' else ""
+    
+    # 定義資料夾名稱組成元素
+    folder_components = [
+        f"UECA-CE_ST_{timestamp}",
+        f"f{opt.start_fold}-{opt.end_fold}",
+        f"i{opt.training_iter}",
+        f"lr{lr_str}",
+        f"bs{opt.batch_size}",
+        f"wd{opt.weight_decay}",
+        f"{threshold_str}",
+        f"{selector_str}",
+        f"{nest_multiplier_str}",
+        f"{nest_params_str}",
+        f"gamma{opt.gamma}",
+        f"{nlm_str}",
+        f"st{opt.self_training_rounds}",
+        f"ste{opt.st_training_epochs}",
+        f"seed{opt.seed}",
+        f"test_model_type_{opt.test_model_type}",
+        "v2",
+        "CE"
+    ]
+
+    # 如果有指定模型名稱，加入到資料夾名稱中 (放在前面較顯眼的位置)
+    if model_name:
+        folder_components.insert(1, f"{model_name}")
+
+    # 組合資料夾名稱
+    folder_name = "_".join(filter(None, folder_components)) # filter removes empty strings if any
+    
+    return os.path.join(parent_dir, folder_name)
 
 use_gpu = False
 if opt.usegpu and torch.cuda.is_available():
@@ -1255,22 +1275,23 @@ class MyDataset(Dataset):
             for i in range(1, d_len + 1):
                 full_document = full_document + ' ' + str(i) + ' ' + part_sentence[i - 1]
                 mask_full_document = mask_full_document + ' ' + str(i) + ' ' + part_sentence[i - 1]
-                mask_label_full_document = mask_label_full_document + ' [MASK] ' + part_sentence[i - 1]
-                if i in pos: # 如果子句 i 是「情緒子句」
-                    full_document = full_document + '是 '
-                else:
-                    full_document = full_document + '非 '
-
-                if i in cause:
-                    full_document = full_document + '是 '
-                else:
-                    full_document = full_document + '非 '
+                mask_label_full_document = mask_label_full_document + ' ' + str(i) + ' ' + part_sentence[i - 1]
                 if i in pos:
-                    cause_index = pos.index(i) # 找出 i 在 pos 列表中的索引位置
-                    if cause_index < len(cause):
-                        full_document = full_document + str(cause[cause_index]) + ' '
+                    full_document = full_document + '是 '
+                    if i in cause:
+                        full_document = full_document + '是 '
+                        full_document = full_document + ' ' + str(pos[cause.index(i)]) + ' '
+                    else:
+                        full_document = full_document + '非 '
+                        full_document = full_document + ' 无 '
                 else:
-                    full_document = full_document + '无 '
+                    full_document = full_document + '非 '
+                    if i in cause:
+                        full_document = full_document + '是 '
+                        full_document = full_document + ' ' + str(pos[cause.index(i)]) + ' '
+                    else:
+                        full_document = full_document + '非 '
+                        full_document = full_document + ' 无 '
 
                 full_document = full_document + '[SEP]' # 作為標準答案
                 mask_full_document = mask_full_document + "[MASK] [MASK] [MASK] [SEP]" # 給模型的輸入(題目)
@@ -1320,6 +1341,13 @@ class MyDataset(Dataset):
         print('MyDataset: n_cut {}, over_limit_count {}, final_dataset_size {}'.format(
             self.n_cut, cnt_over_limit, len(self.x_bert)))
         print('load data done!\n')
+        
+        # Debug: 輸出第一筆樣本的 decoded 格式 (保留特殊 token)
+        if len(self.x_bert) > 0 and self.tokenizer is not None:
+            print("=== 第一筆樣本的 decoded 輸入 (x_bert，含特殊 token) ===")
+            print(self.tokenizer.decode(self.x_bert[0], skip_special_tokens=False))
+            print("=== 第一筆樣本的 decoded 標籤 (y_bert，含特殊 token) ===")
+            print(self.tokenizer.decode(self.y_bert[0], skip_special_tokens=False))
 
         self.index = [i for i in range(len(self.x_bert))]
 
@@ -1426,7 +1454,7 @@ class PseudoLabeledDataset(Dataset):
 
 
 def extract_ground_truth_mask_tokens(doc, tokenizer):
-    """Build the ground-truth token ids at [MASK] positions for a document."""
+    """建立文件中 [MASK] 位置的真實標籤 token ids"""
     # 若文件沒有 pairs 欄位代表沒有情緒-原因配對資訊
     if "pairs" not in doc:
         # 沒有 ground truth 可以建立時直接返回 None
@@ -1457,26 +1485,24 @@ def extract_ground_truth_mask_tokens(doc, tokenizer):
         mask_full_document += ' ' + str(i) + ' ' + part_sentence[i - 1]
         # 檢查「當前的子句 i」是不是一個情緒子句
         if i in pos:
-            # EC 版本：如果是情緒子句
+            # 如果是，就在 full_document 這個字串的最後面加上 "是" 這個字
             full_document += '是 '
-        else:
-            full_document += '非 '
-
-        if i in cause:
-            # EC 版本：如果是原因子句
-            full_document += '是 '
-        else:
-            full_document += '非 '
-
-        if i in pos:
-            # EC 版本：情緒子句需要預測對應的原因編號
-            cause_index = pos.index(i)
-            if cause_index < len(cause):
-                full_document += str(cause[cause_index]) + ' '
+            # 情緒句同時也是原因句時，需要接第二個判斷與指向的情緒句編號
+            if i in cause:
+                full_document += '是 '
+                full_document += ' ' + str(pos[cause.index(i)]) + ' '
             else:
-                full_document += '无 '
+                full_document += '非 '
+                full_document += ' 无 '
         else:
-            full_document += '无 '
+            full_document += '非 '
+            # 非情緒句若是原因句也要標示對應的情緒編號
+            if i in cause:
+                full_document += '是 '
+                full_document += ' ' + str(pos[cause.index(i)]) + ' '
+            else:
+                full_document += '非 '
+                full_document += ' 无 '
 
         # 每個子句後面補上一個 [SEP] 分隔符
         full_document += '[SEP]'
@@ -1516,7 +1542,7 @@ def extract_ground_truth_mask_tokens(doc, tokenizer):
 
 
 def prepare_pseudo_ground_truth_map(unlabeled_dataset, unlabeled_json_path, tokenizer):
-    """Create a mapping from doc_id to ground-truth mask token ids for pseudo-label evaluation."""
+    """建立 doc_id 到真實標籤 (ground-truth mask token ids) 的對照表，用於評估偽標籤品質"""
     # 透過 getattr 安全取得資料集中的 doc_id 清單，若沒有屬性則給空列表
     doc_ids = getattr(unlabeled_dataset, 'doc_id', [])
     # summary 用來記錄可比較文件數量與缺漏原因
@@ -1770,7 +1796,7 @@ def crf_prompt(logits, labels, x_bert, gt_emotion, gt_cause, gt_pair, save_path=
 
                 if count_mask == 2:   #第三個'[MASK]'(預測相關子句)
                     count_sentence += 1 #計算當前句子數量
-                    mask = torch.zeros([21128]) #初始化一個大小為21128的全零張量作為遮罩（對照表的大小）
+                    mask = torch.zeros([21128]) #初始化一個大小為21128的全零張量作為遮罩 (對照表的大小)
                     case = [label_index[k] for k in range(max(0, -opt.window_size + count_sentence - 1),
                                                           min(75, opt.window_size + count_sentence))]
                     #建立一個case列表，包含當前句子範圍內的標籤索引，滑動視窗來選取有效的標籤範圍(避免超出句子邊界)
@@ -1790,10 +1816,10 @@ def crf_prompt(logits, labels, x_bert, gt_emotion, gt_cause, gt_pair, save_path=
                 j = j + 1
     p_emotion = emo_acc / (emo_pre + 1e-8)
     p_cause = cause_acc / (cause_pre + 1e-8)
-    p_pair = pair_acc / (pair_pre + 1e-8)
+    p_pair = pair_acc / (pair_pre + 1e-8) # 預測出的組合數
     r_emotion = emo_acc / (emo_gt + 1e-8)
     r_cause = cause_acc / (cause_gt + 1e-8)
-    r_pair = pair_acc / (pair_gt + 1e-8)
+    r_pair = pair_acc / (pair_gt + 1e-8) # ground truth組合數
     f_emotion = 2 * p_emotion * r_emotion / (p_emotion + r_emotion + 1e-8)
     f_cause = 2 * p_cause * r_cause / (p_cause + r_cause + 1e-8)
     f_pair = 2 * p_pair * r_pair / (p_pair + r_pair + 1e-8)
@@ -2015,7 +2041,7 @@ def _run_main(save_path):
     for fold in range(opt.start_fold, opt.end_fold + 1):
         fold_start_time = time.time()  # 記錄當前 fold 開始時間
         print(f"\n  Fold {fold} 開始時間: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
-        best_val_info_path = os.path.join(save_path, f'fold{fold}_best_val_checkpoint.txt')
+        best_val_info_path = os.path.join(save_path, f'fold{fold}_best_val_checkpoint.txt') # 用來記錄在驗證集上最佳的結果
         if os.path.exists(best_val_info_path):
             os.remove(best_val_info_path)
         best_val_stage = None
@@ -2024,7 +2050,8 @@ def _run_main(save_path):
         print('build model..')
         model = prompt_bert(bert_path)
         print('build model end...')
-        
+
+        # 直接使用已訓練的模型進行測試不進行訓練時，這個判斷是才會為True
         if opt.checkpoint:
             if opt.test_model_type == 'self_training':
                 # 載入 Self-training 的最佳模型
@@ -2065,27 +2092,28 @@ def _run_main(save_path):
             available = pseudo_gt_summary.get('with_ground_truth', 0)
             candidates = pseudo_gt_summary.get('candidate_docs', 0)
             print(f"偽標籤品質記錄：可比較真實答案的樣本 {available}/{candidates}")
+            # 從字典(dict)中獲取鍵(key)對應的值(value)，如果key不存在返回預設值0 (if判斷即為False不印出數量)
             if pseudo_gt_summary.get('missing_pairs', 0):
                 print(f"  缺少 pairs 的樣本數: {pseudo_gt_summary['missing_pairs']}")
             if pseudo_gt_summary.get('not_found', 0):
                 print(f"  JSON 中找不到對應 doc_id 的樣本數: {pseudo_gt_summary['not_found']}")
             if pseudo_gt_summary.get('build_error', 0):
                 print(f"  建立真實標籤失敗的樣本數: {pseudo_gt_summary['build_error']}")
-        NLP_Dataset = {x: MyDataset(edict[x], test=(x == 'test'), tokenizer=tokenizer) for x in ['train', 'val', 'test']}
+        NLP_Dataset = {x: MyDataset(edict[x], test=(x == 'test'), tokenizer=tokenizer) for x in ['train', 'val', 'test']} # Dicitionary Comprehension，一次建立三個資料集
         trainloader = DataLoader(NLP_Dataset['train'], batch_size=opt.batch_size, shuffle=True, drop_last=True)
         train_eval_loader = DataLoader(NLP_Dataset['train'], batch_size=opt.batch_size, shuffle=False)
         valloader = DataLoader(NLP_Dataset['val'], batch_size=opt.batch_size, shuffle=False)
         unlabeled_loader = DataLoader(unlabeled_dataset, batch_size=opt.batch_size, shuffle=False)
         pseudo_dataset_list = []
-        """
+        
         num_train_data = len(NLP_Dataset['train'])
         print(f"--- 訓練資料集 (NLP_Dataset['train']) 總共有: {num_train_data} 筆資料") # 1750筆資料
-        """
+        
         testloader = DataLoader(NLP_Dataset['test'], batch_size=opt.batch_size, shuffle=False)
-        """
+        
         num_test_data = len(NLP_Dataset['test'])
         print(f"--- 訓練資料集 (NLP_Dataset['train']) 總共有: {num_test_data} 筆資料") # 195筆資料
-        """
+        
     
         max_p_emotion, max_r_emotion, max_f1_emotion, max_p_cause, max_r_cause, max_f1_cause, max_p_pair,\
         max_r_pair, max_f1_pair = [-1.] * 9
@@ -2224,6 +2252,13 @@ def _run_main(save_path):
                 for index, data in enumerate(trainloader):
                     with torch.autograd.set_detect_anomaly(True):
                         x_bert, y_bert, label, mask_label, gt_emotion, gt_cause, gt_pair, is_labeled = data
+                        # x_bert(輸入序列含[MASK])，shape=(batch_size, 512)
+                        # y_bert(不含[MASK]的序列)，shape=(batch_size, 512)
+                        # label與mask_label一樣
+                        # mask_label([MASK]位置的正確答案，對應的 token ID)，shape=(batch_size, 512)，-100表示忽略
+                        # gt_emotion(情緒句索引)
+                        # gt_cause(原因句索引)
+                        # gt_pair(情緒句和原因句索引)
                         if use_gpu:
                             x_bert = x_bert.cuda()
                             y_bert = y_bert.cuda()
@@ -2232,18 +2267,18 @@ def _run_main(save_path):
 
 
 
-                        loss, logits = model(x_bert, mask_label)
-                        logits = F.softmax(logits, dim=-1)
+                        loss, logits = model(x_bert, mask_label) # loss: 所有有效[MASK]位置的平均Cross-Entropy(有效指的是，只有 [MASK] 位置的 mask_label 才不是 -100)、shape=logits=(batch_size,512,21128)
+                        logits = F.softmax(logits, dim=-1)  # shape=(batch_size, 512, 21128)
 
 
-                        optimizer.zero_grad()
+                        optimizer.zero_grad() # 清空上一輪的梯度
                         if use_gpu:
                             loss = loss.cuda()
-                        loss.backward()
-                        optimizer.step()
+                        loss.backward() # 反向傳播，計算梯度
+                        optimizer.step() # 更新模型參數
 
                         print("loss: {:.4f}".format(loss))
-                        # 每20個批次，執行crf_prompt
+                        # 每20個批次，執行crf_prompt，評估模型在訓練集上的表現（情緒/原因/配對的 P/R/F1）
                         if index % 20 == 0:
                             # 寫入批次到同一個文件
                             p_emotion, r_emotion, f_emotion, p_cause, r_cause, f_cause, p_pair, r_pair, f_pair = \
@@ -2583,8 +2618,9 @@ def _run_main(save_path):
                 if opt.pseudo_selector == 'threshold':
                     mask_token_id = tokenizer.mask_token_id
                     threshold = opt.threshold
-                    apply_emotion_threshold = opt.mask_threshold_mode in ('emotion', 'both')
-                    apply_cause_threshold = opt.mask_threshold_mode in ('cause', 'both')
+                    apply_emotion_threshold = opt.mask_threshold_mode in ('emotion', 'both', 'all')
+                    apply_cause_threshold = opt.mask_threshold_mode in ('cause', 'both', 'all')
+                    apply_pair_threshold = opt.mask_threshold_mode == 'all'
                     use_or_mode = opt.mask_threshold_mode == 'or'
                     label_index = get_label_index()
 
@@ -2595,45 +2631,37 @@ def _run_main(save_path):
                         logits = F.softmax(logits, dim=-1)
 
                         batch_selected = 0
+                        batch_pair_filtered = 0  # 統計被 pair 閾值過濾的樣本數 (僅 all 模式)
                         for i in range(batch_cpu.shape[0]):
                             mask_positions = np.where(batch_cpu[i] == mask_token_id)[0]
                             pseudo_label = []
                             all_pass = True
-                            emotion_predictions = {}
+                            cause_predictions = {}
                             clause_emotion_confident = False
                             clause_cause_confident = False
 
                             for j, pos in enumerate(mask_positions):
-                                # j: 目前是第幾個 [MASK]
-                                # pos: 這個 [MASK] 在 token 序列中的實際索引位置
                                 pos_idx = int(pos)
                                 count_sentence = j // 3 + 1
                                 mask_type = j % 3
 
-                                if mask_type == 0: # 第一個 [MASK] (情緒子句預測)
+                                if mask_type == 0:
                                     if use_or_mode:
-                                        # 每遇到新的子句時重置，準備重新判斷「情緒/原因至少一個達標」
                                         clause_emotion_confident = False
                                         clause_cause_confident = False
-                                    prob, pred_token_id = torch.max(logits[i, pos_idx], dim=-1) # dim=-1 取得最後一個維度 softmax 機率的最大值
+                                    prob, pred_token_id = torch.max(logits[i, pos_idx], dim=-1)
                                     prob_val = prob.item()
                                     if use_or_mode:
-                                        # 紀錄情緒[為True即代表第一個[MASK]已達閾值]
                                         clause_emotion_confident = prob_val >= threshold
                                     elif apply_emotion_threshold and prob_val < threshold:
                                         all_pass = False
                                         break
-                                    pred_token_id_val = pred_token_id if isinstance(pred_token_id, int) else pred_token_id.item()
-                                    pseudo_label.append(pred_token_id_val)
-                                    # 記錄當前子句是否被預測為情緒子句，供第三個 [MASK] 使用
-                                    emotion_predictions[count_sentence] = (pred_token_id_val == 3221)  # 3221 是'是'的token_id
-                                elif mask_type == 1: # 第二個 [MASK] (原因子句預測)
-                                    prob, pred_token_id = torch.max(logits[i, pos_idx], dim=-1) # dim=-1 同樣針對最後一維的分類機率取最大值
+                                    pseudo_label.append(pred_token_id if isinstance(pred_token_id, int) else pred_token_id.item())
+                                elif mask_type == 1:
+                                    prob, pred_token_id = torch.max(logits[i, pos_idx], dim=-1)
                                     prob_val = prob.item()
                                     if use_or_mode:
-                                        # 紀錄原因[為True即代表第二個[MASK]已達閾值]
                                         clause_cause_confident = prob_val >= threshold
-                                        # or 模式要求「情緒或原因至少一個達到閾值」，若都不達標就放棄此子句
                                         if not (clause_emotion_confident or clause_cause_confident):
                                             all_pass = False
                                             break
@@ -2642,22 +2670,28 @@ def _run_main(save_path):
                                         break
                                     pred_token_id_val = pred_token_id if isinstance(pred_token_id, int) else pred_token_id.item()
                                     pseudo_label.append(pred_token_id_val)
-                                else: # mask_type == 2, 第三個 [MASK] (配對預測)
-                                     # 檢查當前子句是否被預測為情緒子句
-                                    if emotion_predictions.get(count_sentence, False):
-                                        # 如果被預測為情緒子句，才找對應的原因子句編號
+                                    cause_predictions[count_sentence] = (pred_token_id_val == 3221)
+                                else:  # mask_type == 2 (pair position) - 第3個[MASK]，預測「配對句編號」
+                                    if cause_predictions.get(count_sentence, False):  # 如果該子句被預測為「原因句」
+                                        # 建立候選配對編號列表 (在 window_size 範圍內的句子編號)
                                         case = [label_index[k] for k in range(
                                             max(0, -opt.window_size + count_sentence - 1),
                                             min(75, opt.window_size + count_sentence)
-                                        )] # case: 合法的 token id list
-                                        case.append(3187) # '无'
-                                        candidate_logits = logits[i, pos_idx, case] # 取出pos位置在case對應的softmax機率
-                                        selected_idx = torch.argmax(candidate_logits).item() # 在這些合法候選中，找出最大 softmax 機率的位置(索引)
-                                        pred_token_id = case[selected_idx] # 假設pred_token_id = 125(代表配對到第4個子句)
-                                        pseudo_label.append(pred_token_id if isinstance(pred_token_id, int) else pred_token_id.item())
+                                        )]
+                                        case.append(3187)  # 加入 "无" (無配對) 的 token id
+                                        candidate_logits = logits[i, pos_idx, case]  # 取得模型對這些候選的 logits
+                                        # 先對 logits 做 softmax 轉成機率，然後取最大機率值和索引
+                                        max_prob, selected_idx = torch.max(F.softmax(candidate_logits, dim=-1), dim=-1)
+                                        pred_token_id = case[selected_idx.item()]  # 取得預測的 token id
+                                        # all 模式: pair 位置也需檢查閾值
+                                        # 【新增】如果是 'all' 模式，檢查 pair 位置的信心度
+                                        if apply_pair_threshold and max_prob.item() < threshold:
+                                            batch_pair_filtered += 1  # 統計被 pair 閾值過濾的樣本
+                                            all_pass = False  # 信心度不足，這個樣本不通過
+                                            break  # 跳出迴圈，不繼續處理這個樣本
+                                        pseudo_label.append(pred_token_id if isinstance(pred_token_id, int) else pred_token_id.item())  # 通過檢查，加入偽標籤
                                     else:
-                                        # 如果不是情緒子句，直接填入'无'
-                                        pseudo_label.append(3187) # 3187 是'无'的token_id
+                                        pseudo_label.append(3187)  # 不是原因句 → 直接填 "无"
 
                             if all_pass and mask_positions.size > 0:
                                 doc_global_idx = batch_start_idx + i
@@ -2665,7 +2699,10 @@ def _run_main(save_path):
                                 append_pseudo_sample(doc_id, batch_cpu[i], pseudo_label)
                                 batch_selected += 1
 
-                        print(f"本 batch 收集到 {batch_selected} 筆 pseudo-labeled 樣本 (閥值: {threshold}, 模式: {opt.mask_threshold_mode})")
+                        if apply_pair_threshold:
+                            print(f"本 batch 收集到 {batch_selected} 筆 pseudo-labeled 樣本 (閥值: {threshold}, 模式: {opt.mask_threshold_mode}, pair閾值過濾: {batch_pair_filtered} 筆)")
+                        else:
+                            print(f"本 batch 收集到 {batch_selected} 筆 pseudo-labeled 樣本 (閥值: {threshold}, 模式: {opt.mask_threshold_mode})")
                         batch_start_idx += batch_cpu.shape[0]
 
                         if use_gpu:
@@ -2673,10 +2710,10 @@ def _run_main(save_path):
                         del logits
 
                 elif opt.pseudo_selector == 'nest':  # [AAAI 2023] NeST
-                    # 1. 收集有標籤資料集的統計資訊 (特徵向量、情緒標籤、原因標籤、情緒句分佈)
-                    # 取得有標籤資料集的所有 doc_id 列表，用於 debug 輸出
+                    # 1. 收集有標註資料集的統計資訊 (特徵向量、情緒標籤、原因標籤、情緒句分佈)
+                    # 取得有標註資料集的所有 doc_id 列表，用於 debug 
                     labeled_doc_ids = [NLP_Dataset['train'].doc_id[i] for i in range(len(NLP_Dataset['train']))]
-                    # 取得有標籤資料集的所有 pairs 列表，用於 debug 輸出
+                    # 取得有標註資料集的所有 pairs 列表，用於 debug 
                     labeled_pairs_list = [NLP_Dataset['train'].pairs[i] for i in range(len(NLP_Dataset['train']))]
                     labeled_features, labeled_emotion, labeled_cause, labeled_emotion_clause, labeled_cause_clause, labeled_embedding_info = collect_labeled_statistics(
                         model, train_eval_loader, tokenizer, device,
@@ -2684,10 +2721,16 @@ def _run_main(save_path):
                         debug_num_docs=10,    # 只對前 10 篇文檔啟用詳細 debug
                         doc_ids=labeled_doc_ids,  # 傳入文檔 ID 列表
                         pairs_list=labeled_pairs_list,  # 傳入 pairs 列表
-                        knn_embedding_mode=opt.knn_embedding_mode,  # 使用命令列參數指定的 embedding 模式
+                        knn_embedding_mode=opt.knn_embedding_mode,  # 使用參數指定的 embedding 模式
                         return_embedding_info=True  # 取得每個樣本的 embedding 詳細資訊
                     )
-                    
+                    # labeled_features: 標註樣本的嵌入向量([CLS]或是情緒/原因子句)
+                    # labeled_emotion: 標註樣本的情緒機率分佈[p(是)、p(非)](所有子句平均)
+                    # labeled_cause: 標註樣本的原因機率分佈[p(是)、p(非)](所有子句平均)
+                    # labeled_emotion_claus: 標註樣本的情緒分佈(只取預測為情緒句的子句)
+                    # labeled_cause_clause: 標註樣本的原因分佈(只取預測為原因句的子句)
+                    # labeled_embedding_info: 標註樣本的嵌入資訊(用於debug)
+
                     # ===== DEBUG: 檢查 collect_labeled_statistics 回傳值的形狀 =====
                     print("=" * 60)
                     print("[DEBUG] collect_labeled_statistics 回傳值形狀:")
@@ -2760,8 +2803,8 @@ def _run_main(save_path):
                             k=opt.nest_k,               # KNN 的 k 值
                             num_samples=num_to_select,  # 目標挑選數量
                             beta=opt.nest_beta,         # 平滑參數
-                            m=opt.nest_m,               # 擴充倍率參數
-                            prev_val=nest_prev_scores,  # 前一輪的 EMA 分數 dict {doc_id: score}
+                            m=opt.nest_m,               # 倍率參數
+                            prev_val=nest_prev_scores,  # \mu^{(t-1)} 分數 dict {doc_id: score}
                             divergence_mode=opt.nest_divergence_mode,  # 散度計算模式
                             return_details=True,        # 返回詳細計算資訊
                             labeled_doc_ids=labeled_doc_ids,   # 有標籤樣本的 doc_id
@@ -3357,7 +3400,6 @@ def _run_main(save_path):
                         x_l = x_bert[labeled_mask]
                         mask_label_l = mask_label[labeled_mask]
                         loss_l, _ = model(x_l.cuda() if use_gpu else x_l, mask_label_l.cuda() if use_gpu else mask_label_l)
-                        loss_l = loss_l / labeled_mask.sum()
                     else:
                         loss_l = 0
 
@@ -3368,11 +3410,10 @@ def _run_main(save_path):
                         if opt.nest_loss_mode == 'nest':
                             # NeST 論文的 threshold 過濾方式: 只有信心 > γ 的位置才計入 loss
                             loss_p = compute_nest_threshold_loss(model, x_p, mask_label_p, opt.nest_loss_threshold, use_gpu)
-                            logits_p = None
+                            logits_p = None  # nest 模式不需要 logits_p (debug 用)
                         else:
                             # 標準方式: 所有偽標籤都計入 loss
                             loss_p, logits_p = model(x_p.cuda() if use_gpu else x_p, mask_label_p.cuda() if use_gpu else mask_label_p)
-                            loss_p = loss_p / pseudo_mask.sum()
                         
                         # Debug: 在特定 round/epoch/batch 輸出 loss_p 驗證資訊
                         # 條件1: 第1輪第1個epoch | 條件2: 第5輪第3個epoch (注意: 索引從0開始)
@@ -3444,8 +3485,9 @@ def _run_main(save_path):
                                     print(f"\n    [MASK] #{i+1} (位置 {pos}):")
                                     print(f"      偽標籤 token id: {target} → '{tokenizer.decode([target])}'")
                                     print(f"      偽標籤的機率 p(target): {target_prob:.6f}")
-                                    print(f"      模型預測: {pred_token} → '{tokenizer.decode([pred_token])}' (p={pred_prob:.6f})")
-                                    print(f"      CE Loss: {ce_loss:.6f}")
+                                    print(f"      模型預測 token id: {pred_token} → '{tokenizer.decode([pred_token])}'")
+                                    print(f"      模型預測的機率 p(pred): {pred_prob:.6f}")
+                                    print(f"      CE loss = -log({target_prob:.6f}) = {ce_loss:.6f}")
                                 
                                 print("-"*80)
                                 manual_avg_ce = total_ce / max(num_valid, 1)
@@ -3476,12 +3518,12 @@ def _run_main(save_path):
                                         batch_num_valid += 1
                                 
                                 # 計算平均 CE (需與 HuggingFace 的計算方式一致)
-                                batch_avg_ce = batch_total_ce / max(batch_num_valid, 1)  # Step 1: 每個 [MASK] 的平均 CE
-                                batch_avg_ce = batch_avg_ce / num_pseudo_samples         # Step 2: 再除以樣本數 (對應 Line 3218 的 loss_p / pseudo_mask.sum())
+                                # BertForMaskedLM 的 output.loss 已是「所有有效 [MASK] 位置」的平均 CE
+                                batch_avg_ce = batch_total_ce / max(batch_num_valid, 1)
                                 
                                 print(f"    手動計算的平均 CE (整個 batch) = {batch_avg_ce:.6f}")
                                 
-                                print(f"\n[4] HuggingFace 回傳的 loss_p (已正規化): {hf_loss:.6f}")
+                                print(f"\n[4] HuggingFace 回傳的 loss_p (有效 [MASK] 平均 CE): {hf_loss:.6f}")
                                 
                                 # 比較整個 batch 的差異
                                 diff = abs(batch_avg_ce - hf_loss)
@@ -3492,7 +3534,7 @@ def _run_main(save_path):
                                     print("    ✓ 兩者一致！(差異 < 1%)")
                                 else:
                                     print(f"    ⚠ 差異較大")
-                                print("="*80 + "\n") 
+                                print("="*80 + "\n")
                     else:
                         loss_p = 0
 
@@ -3524,7 +3566,7 @@ def _run_main(save_path):
                 
             print(f"  完成 {opt.st_training_epochs} 個 epoch 的訓練")
 
-            # 在驗證集上測試當前模型性能（而不是測試集）
+            # 在驗證集上測試當前模型性能 (而不是測試集)
             model.eval()
             all_val_logits = torch.tensor([])
             all_val_label = torch.tensor([])
@@ -3784,25 +3826,53 @@ def _run_main(save_path):
 
 
 def run():
+    """
+    程式執行入口點
+    
+    功能：
+    1. 建立輸出目錄
+    2. 設定 console 輸出同步寫入日誌檔
+    3. 執行主程式 _run_main()
+    """
+    # 取得輸出路徑 (從命令列參數 --save_path)
     save_path = opt.save_path
+    
+    # 建立輸出資料夾 (若不存在則自動建立)
     os.makedirs(save_path, exist_ok=True)
 
+    # 產生時間戳記
     timestamp = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime())
+    
+    # 設定 console 輸出日誌的檔名與完整路徑
     console_log_name = f'run_console_output_{timestamp}.txt'
     console_log_path = os.path.join(save_path, console_log_name)
+    
+    # 開啟日誌檔
     log_file = open(console_log_path, 'w', encoding='utf-8')
+    
+    # 保存原始的標準輸出(指向 console)
     original_stdout = sys.stdout
+    
+    # 把 stdout 改成 Tee (同時輸出到 console + 檔案)，之後所有 print() 都會同時寫入 console 和 log_file
     sys.stdout = Tee(sys.stdout, log_file)
 
     try:
+        # 輸出執行資訊
         print(f"Console output is being copied to: {console_log_path}")
         print(f"Executing Script: {os.path.basename(__file__)}")
         print(f"Start Time: {timestamp}")
+        
+        # 執行主程式 (包含訓練、自訓練、測試等所有流程)
         _run_main(save_path)
     finally:
+        # 恢復原始標準輸出，現在 print() 只會輸出到 console
+        # sys.stdout 是 Python 的標準輸出，預設是console
         sys.stdout = original_stdout
+        
+        # 關閉日誌檔
         log_file.close()
 
 
 if __name__ == '__main__':
+    # 程式進入點：當此腳本被直接執行時（而非被 import），執行 run()
     run()

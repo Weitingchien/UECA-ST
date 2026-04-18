@@ -54,37 +54,13 @@ def parse_counts_summary(filepath):
 
 
 def get_short_name(folder_name):
-    """
-    從資料夾名稱中提取簡短的標籤名稱
-    
-    參數：
-        folder_name: 完整資料夾名稱
-    
-    回傳：
-        str: 簡短標籤 (例如: th0.9_mask_emotion 或 nest_k5_emotion_clause_nestmul3)
-    """
-    # 優先匹配 emotion_clause / cause_clause + nestmul: 例如 nest_k5_emotion_clause_nestmul3
-    clause_mul_match = re.search(
-        r'(nest_k\d+_(emotion|cause)_clause_nestmul\d+(?:p\d+)?)(?:_|$)',
-        folder_name,
-    )
-    if clause_mul_match:
-        return clause_mul_match.group(1)
-    
-    # 匹配 nest + nestmul (無 clause):例如 nest_k5_emotion_nestmul0p5
-    nest_mul_match = re.search(
-        r'(nest_k\d+_(emotion|cause)_nestmul\d+(?:p\d+)?)(?:_|$)',
-        folder_name,
-    )
-    if nest_mul_match:
-        return nest_mul_match.group(1)
-
-    # 嘗試匹配 nest 模式: nest_k{數字}_{emotion|cause}
+    """從資料夾名稱中提取簡短標籤"""
+    # 嘗試匹配 nest 模式
     nest_match = re.search(r'(nest_k\d+_(emotion|cause))', folder_name)
     if nest_match:
         return nest_match.group(1)
     
-    # 嘗試匹配 mask 模式: th{數字}_mask{emotion|cause}
+    # 嘗試匹配 mask 模式
     mask_match = re.search(r'th[\d.]+_mask(emotion|cause)', folder_name)
     if mask_match:
         mode = mask_match.group(1)
@@ -92,7 +68,6 @@ def get_short_name(folder_name):
         th_str = th_match.group(1) if th_match else 'th0.9'
         return f"{th_str}_mask_{mode}"
     
-    # 都找不到就回傳最後 30 個字元
     return folder_name[-30:]
 
 
@@ -138,9 +113,9 @@ def plot_pair_m1_bar_chart(all_data, output_path=None):
     ax.set_title('Pair (m1) 10 折累計統計結果比較', fontsize=24, fontweight='bold', fontname=FONT_CHINESE)
     ax.set_ylabel('百分比 (%)', fontsize=24, fontname=FONT_CHINESE)
     
-    # 設定 X 軸 (標籤旋轉 45 度避免重疊)
+    # 設定 X 軸
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=18, fontname=FONT_ENGLISH, rotation=5, ha='right')
+    ax.set_xticklabels(labels, fontsize=18, fontname=FONT_ENGLISH)
     
     # 設定 Y 軸
     ax.set_ylim(0, max(max(p_values), max(r_values), max(f1_values)) + 15)
