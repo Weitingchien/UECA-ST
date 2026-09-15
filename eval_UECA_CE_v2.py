@@ -122,7 +122,7 @@ def save_ground_truth_as_text(gt_file, pred_file, output_file):
                 cause_tag = "是"
                 # !!! 注意：這裡有潛在問題 !!!
                 # 如果一個原因 i 對應多個情緒 (一對多)，cause.index(i) 只會回傳第一個
-                # 導致第二個配對被遺漏。這就是為什麼我們需要後面的 total_gt_override 機制。
+                # 導致第二個配對被遺漏。這就是為什麼我們需要後面的 total_gt_override 機制
                 pair_id = str(pos[cause.index(i)])
             else:
                 cause_tag = "非"

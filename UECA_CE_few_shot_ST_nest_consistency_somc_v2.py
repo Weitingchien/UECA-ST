@@ -73,7 +73,8 @@ def _build_pair_candidate_ids(clause_index, window_size, pair_label_index, no_pa
     candidates.append(no_pair_token_id)
     return candidates
 
-
+# 論文裡的 Eq.2 / Eq.3 是一般分類 pseudo-label 更新
+# 在Prompt-based ECPE任務，我們需要根據模型對 [MASK] 的預測來產生偽標籤 token 序列，這些 token 代表情緒、原因、配對的預測結果
 def generate_pseudo_label_tokens(logits, input_ids, mask_token_id, yes_token_id, window_size, tokenizer, threshold=None):
     """根據模型 logits 與原始輸入，為每個 [MASK] 位置產生偽標籤序列
 
@@ -1252,8 +1253,16 @@ parser.add_argument(
 parser.add_argument('--gamma', type=float, default=0.5, help='偽標籤 loss 的權重 (對應論文的 λ，預設 0.5)')
 parser.add_argument('--self_training_rounds', type=int, default=10,help='number of self-training rounds')
 parser.add_argument('--st_training_epochs', type=int, default=3, help='number of epochs to train in each self-training round')
+parser.add_argument('--initial_supervised_metric', type=str, default='pair', choices=['pair', 'emotion', 'cause'],
+                    help='初始監督訓練結束後，進入 self-training 前要載入的最佳模型指標: pair=最佳 pair F1, emotion=最佳 emotion F1, cause=最佳 cause F1')
+parser.add_argument('--self_training_main_metric', type=str, default='pair', choices=['pair', 'emotion', 'cause'],
+                    help='self-training 每輪主模型切換依據的驗證指標: pair=最佳 pair F1, emotion=最佳 emotion F1, cause=最佳 cause F1')
+parser.add_argument('--test_metric', type=str, default='pair', choices=['pair', 'emotion', 'cause'],
+                    help='最終測試時要載入的最佳模型指標: 對 initial/self_training 生效；若 test_model_type=self_training_avg3 則忽略')
 parser.add_argument('--test_model_type', type=str, default='initial', choices=['initial', 'self_training', 'self_training_avg3'], 
-                    help='which model to test: initial (fold{i}_best_pair.pth), self_training (self_training_models/fold{i}_self_training_best_pair.pth), or self_training_avg3 (simple-mean average of self_training_best_emo/cause/pair)')
+                    help='which model to test: initial (監督訓練最佳模型), self_training (self-training 最佳模型), or self_training_avg3 (simple-mean average of self_training_best_emo/cause/pair)')
+parser.add_argument('--final_eval_split', type=str, default='test', choices=['test', 'val'],
+                    help='test_only 或最終評估時使用的資料切分，預設為 test；若要統計最終 Avg3 驗證 Pair F1 可設為 val')
 parser.add_argument('--log_pseudo_quality', action='store_true',
                     help='compare pseudo labels against ground truth when available and persist error statistics')
 parser.add_argument('--pseudo_selector', type=str, default='threshold', choices=['threshold', 'nest', 'random', 'hybrid', 'consistency_only'],
@@ -1311,6 +1320,55 @@ parser.set_defaults(save_val_predictions=True, save_task_specific_checkpoints=No
 
 opt = parser.parse_args()
 os.environ["CUDA_VISIBLE_DEVICES"] = opt.device
+
+METRIC_TO_CHECKPOINT_SUFFIX = {
+    'pair': 'pair',
+    'emotion': 'emo',
+    'cause': 'cause',
+}
+
+METRIC_TO_LABEL = {
+    'pair': 'Pair F1',
+    'emotion': 'Emotion F1',
+    'cause': 'Cause F1',
+}
+
+
+def get_supervised_best_checkpoint_path(base_dir, fold, metric):
+    suffix = METRIC_TO_CHECKPOINT_SUFFIX[metric]
+    return os.path.join(base_dir, f'fold{fold}_best_{suffix}.pth')
+
+
+def get_self_training_best_checkpoint_path(base_dir, fold, metric):
+    suffix = METRIC_TO_CHECKPOINT_SUFFIX[metric]
+    return os.path.join(base_dir, 'self_training_models', f'fold{fold}_self_training_best_{suffix}.pth')
+
+
+def get_test_checkpoint_path(base_dir, fold, test_model_type, metric):
+    if test_model_type == 'initial':
+        return get_supervised_best_checkpoint_path(base_dir, fold, metric)
+    if test_model_type == 'self_training':
+        return get_self_training_best_checkpoint_path(base_dir, fold, metric)
+    raise ValueError(f"不支援以 metric 載入的 test_model_type: {test_model_type}")
+
+
+def get_metric_folder_tags(opt):
+    metric_suffix = {
+        'emotion': 'emo',
+        'cause': 'cau',
+    }
+    tags = []
+
+    if opt.initial_supervised_metric != 'pair':
+        tags.append(f"init{metric_suffix[opt.initial_supervised_metric]}")
+
+    if opt.self_training_main_metric != 'pair':
+        tags.append(f"st{metric_suffix[opt.self_training_main_metric]}")
+
+    if opt.test_model_type in ('initial', 'self_training') and opt.test_metric != 'pair':
+        tags.append(f"test{metric_suffix[opt.test_metric]}")
+
+    return tags
 
 # consistency-only 模式下，強制啟用 task consistency 篩選
 if opt.pseudo_selector == 'consistency_only':
@@ -1440,6 +1498,7 @@ if opt.save_path == 'prompt_ECPE_few_shot_ST' and not opt.test_only:
 
     if ste_str: folder_components.append(ste_str.lstrip('_'))
 
+    folder_components.extend(get_metric_folder_tags(opt))
     folder_components.append(f"seed{opt.seed}")
 
     if retain_pseudo_str: folder_components.append(retain_pseudo_str) # retain_pseudo_str 本身不含底線
@@ -1549,12 +1608,14 @@ def generate_experiment_folder_name(opt, bert_path):
         f"{nlm_str}",
         f"st{opt.self_training_rounds}",
         f"ste{opt.st_training_epochs}",
-        f"seed{opt.seed}",
         f"{consistency_str}",
         f"test_model_type_{opt.test_model_type}",
         "v2",
         "CE"
     ]
+
+    folder_components.extend(get_metric_folder_tags(opt))
+    folder_components.append(f"seed{opt.seed}")
 
     # 如果有指定模型名稱，加入到資料夾名稱中 (放在前面較顯眼的位置)
     if model_name:
@@ -1944,10 +2005,13 @@ def prepare_pseudo_ground_truth_map(unlabeled_dataset, unlabeled_json_path, toke
 
 
 def write_pseudo_label_evaluation_report(output_dir, fold, round_idx, records, total_tokens, correct_tokens,
-                                         filtered_total_tokens, filtered_correct_tokens, tokenizer, summary=None):
+                                         filtered_total_tokens, filtered_correct_tokens, tokenizer, summary=None,
+                                         report_filename=None, extra_summary_lines=None):
     """Persist pseudo-label vs ground-truth comparison details and return the report path."""
     os.makedirs(output_dir, exist_ok=True)
-    report_path = os.path.join(output_dir, f"pseudo_label_evaluation_fold{fold}_round{round_idx + 1}.txt")
+    if report_filename is None:
+        report_filename = f"pseudo_label_evaluation_fold{fold}_round{round_idx + 1}.txt"
+    report_path = os.path.join(output_dir, report_filename)
 
     with open(report_path, "w", encoding="utf-8") as f:
         if summary:
@@ -1960,6 +2024,12 @@ def write_pseudo_label_evaluation_report(output_dir, fold, round_idx, records, t
                 f.write(f"  JSON 中找不到 doc_id 的數量: {summary['not_found']}\n")
             if summary.get('build_error', 0):
                 f.write(f"  Ground truth 建立失敗的文件數: {summary['build_error']}\n")
+            f.write("\n")
+
+        if extra_summary_lines:
+            f.write("附加統計:\n")
+            for line in extra_summary_lines:
+                f.write(f"  {line}\n")
             f.write("\n")
 
         if total_tokens > 0:
@@ -2511,6 +2581,132 @@ def append_pseudo_sample_entry(state, doc_id, x_np, pseudo_np, tokenizer, mask_c
     state['pseudo_logging_entries'].append(pseudo_entry)
 
 
+def evaluate_all_unlabeled_pseudo_entry(state, doc_id, pseudo_array, pseudo_entry, tokenizer):
+    """對全部未標註 pseudo 預測做 GT 比對，並累積統計結果"""
+    gt_tokens = state['pseudo_ground_truth_map'].get(doc_id)
+
+    if gt_tokens is None:
+        raise RuntimeError(
+            f"全部未標註 pseudo 評估失敗: doc_id={doc_id} 找不到對應 ground truth"
+        )
+
+    gt_array = np.array(gt_tokens, dtype=np.int64)
+    if gt_array.shape[0] != pseudo_array.shape[0]:
+        raise RuntimeError(
+            "全部未標註 pseudo 評估失敗: doc_id="
+            f"{doc_id} 的長度不一致 (gt={gt_array.shape[0]}, pseudo={pseudo_array.shape[0]})"
+        )
+
+    pred_tokens_list = tokenizer.convert_ids_to_tokens(pseudo_array.tolist())
+    match_mask = (pseudo_array == gt_array)
+    correct = int(match_mask.sum())
+    total = int(match_mask.size)
+    mismatch_positions = np.where(~match_mask)[0].tolist()
+    state['all_unlabeled_pseudo_eval_correct'] += correct
+    state['all_unlabeled_pseudo_eval_total'] += total
+
+    gt_tokens_list = tokenizer.convert_ids_to_tokens(gt_array.tolist())
+    triple_mask = np.ones_like(gt_array, dtype=bool)
+    for idx_mask in range(0, len(gt_tokens_list), 3):
+        gt_triple = gt_tokens_list[idx_mask:idx_mask + 3]
+        pred_triple = pred_tokens_list[idx_mask:idx_mask + 3]
+        if (len(gt_triple) == 3 and len(pred_triple) == 3 and
+                gt_triple == ['非', '非', '无'] and
+                pred_triple == ['非', '非', '无']):
+            triple_mask[idx_mask:idx_mask + 3] = False
+
+    filtered_match = match_mask[triple_mask]
+    if filtered_match.size > 0:
+        filtered_correct = int(filtered_match.sum())
+        filtered_total = int(filtered_match.size)
+        filtered_error_rate = 1.0 - (filtered_correct / filtered_total)
+        state['all_unlabeled_pseudo_eval_filtered_correct'] += filtered_correct
+        state['all_unlabeled_pseudo_eval_filtered_total'] += filtered_total
+    else:
+        filtered_correct = 0
+        filtered_total = 0
+        filtered_error_rate = None
+
+    pair_match = match_mask[2::3]
+    pair_correct = int(pair_match.sum())
+    pair_total = int(pair_match.size)
+    pair_error_rate = 1.0 - (pair_correct / pair_total) if pair_total > 0 else None
+    pair_fully_correct = (pair_total > 0 and pair_correct == pair_total)
+
+    fully_correct = (correct == total)
+    state['all_unlabeled_pseudo_eval_records'].append({
+        'doc_id': doc_id,
+        'correct': correct,
+        'total': total,
+        'error_rate': 1.0 - (correct / total) if total else 0.0,
+        'pred_tokens': pseudo_array.tolist(),
+        'gt_tokens': gt_array.tolist(),
+        'mismatch_positions': mismatch_positions,
+        'filtered_correct': filtered_correct,
+        'filtered_total': filtered_total,
+        'filtered_error_rate': filtered_error_rate,
+        'pair_correct': pair_correct,
+        'pair_total': pair_total,
+        'pair_error_rate': pair_error_rate,
+        'pair_fully_correct': pair_fully_correct,
+        'fully_correct': fully_correct,
+    })
+
+    pseudo_entry['ground_truth_available'] = True
+    pseudo_entry['gt_label_ids'] = gt_array.tolist()
+    pseudo_entry['gt_label_tokens'] = gt_tokens_list
+    pseudo_entry['match_ratio'] = (correct / total) if total else None
+    pseudo_entry['mismatch_positions'] = mismatch_positions
+    pseudo_entry['pair_match_ratio'] = (pair_correct / pair_total) if pair_total > 0 else None
+    pseudo_entry['pair_error_rate'] = pair_error_rate
+    pseudo_entry['pair_fully_correct'] = pair_fully_correct
+    pseudo_entry['fully_correct'] = fully_correct
+    pseudo_entry['error_count'] = total - correct
+    if filtered_error_rate is not None:
+        pseudo_entry['filtered_match_ratio'] = filtered_correct / filtered_total
+        pseudo_entry['filtered_error_rate'] = filtered_error_rate
+
+
+def record_all_unlabeled_pseudo_predictions(state, doc_ids, x_bert_list, pseudo_tokens_list, tokenizer):
+    """記錄本輪所有未標註文檔的原始 pseudo 預測結果"""
+    if not doc_ids and not x_bert_list and not pseudo_tokens_list:
+        return
+
+    if not doc_ids or not x_bert_list or not pseudo_tokens_list:
+        raise RuntimeError(
+            "未標註 pseudo 記錄失敗: 收到非預期的空列表 "
+            f"(doc_ids={len(doc_ids)}, x_bert_list={len(x_bert_list)}, pseudo_tokens_list={len(pseudo_tokens_list)})"
+        )
+
+    if not (len(doc_ids) == len(x_bert_list) == len(pseudo_tokens_list)):
+        raise RuntimeError(
+            "未標註 pseudo 記錄失敗: 輸入長度不一致 "
+            f"(doc_ids={len(doc_ids)}, x_bert_list={len(x_bert_list)}, pseudo_tokens_list={len(pseudo_tokens_list)})"
+        )
+
+    for doc_id, x_np, pseudo_np in zip(doc_ids, x_bert_list, pseudo_tokens_list):
+        if pseudo_np is None:
+            raise RuntimeError(
+                f"未標註 pseudo 記錄失敗: doc_id={doc_id} 的 pseudo_tokens 為 None"
+            )
+
+        x_copy = np.array(x_np, dtype=np.int64)
+        pseudo_array = np.array(pseudo_np, dtype=np.int64)
+        state['all_unlabeled_pseudo_predictions'].append({
+            'doc_id': doc_id,
+            'x_bert': x_copy,
+            'pseudo_labels': pseudo_array,
+        })
+        pseudo_entry = {
+            'doc_id': doc_id,
+            'pseudo_label_ids': pseudo_array.tolist(),
+            'pseudo_label_tokens': tokenizer.convert_ids_to_tokens(pseudo_array.tolist()),
+        }
+        if state['evaluate_pseudo']:
+            evaluate_all_unlabeled_pseudo_entry(state, doc_id, pseudo_array, pseudo_entry, tokenizer)
+        state['all_unlabeled_pseudo_logging_entries'].append(pseudo_entry)
+
+
 def record_consistency_rejection_entry(state, doc_id, pseudo_np, tokenizer, mask_confidences=None):
     """記錄被 task consistency 拒絕的樣本，並與 GT 比較 (若可用)
     
@@ -2600,6 +2796,7 @@ def _run_main(save_path):
     
     # 生成時間戳記用於 self_training_results 資料夾命名
     st_timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+    eval_checkpoint_root = opt.checkpointpath if opt.test_only else save_path
     
     for fold in range(opt.start_fold, opt.end_fold + 1):
         fold_start_time = time.time()  # 記錄當前 fold 開始時間
@@ -2622,8 +2819,34 @@ def _run_main(save_path):
 
         # 直接使用已訓練的模型進行測試不進行訓練時，這個判斷是才會為True
         if opt.checkpoint:
-            if opt.test_model_type in ('self_training', 'self_training_avg3'):
+            if opt.test_model_type == 'self_training':
                 # 載入 Self-training 的最佳模型
+                st_model_path = get_self_training_best_checkpoint_path(
+                    opt.checkpointpath,
+                    fold,
+                    opt.test_metric,
+                )
+                if os.path.exists(st_model_path):
+                    model = torch.load(st_model_path, map_location=torch.device('cpu'))
+                    print(
+                        f'載入 Self-training 最佳模型: {st_model_path} '
+                        f'(依據 {METRIC_TO_LABEL[opt.test_metric]})'
+                    )
+                else:
+                    print(f'Self-training 模型不存在: {st_model_path}')
+                    print('回退到初始模型...')
+                    fallback_path = get_supervised_best_checkpoint_path(
+                        opt.checkpointpath,
+                        fold,
+                        opt.test_metric,
+                    )
+                    model = torch.load(fallback_path, map_location=torch.device('cpu'))
+                    print(
+                        f'載入初始監督學習模型: {fallback_path} '
+                        f'(依據 {METRIC_TO_LABEL[opt.test_metric]})'
+                    )
+            elif opt.test_model_type == 'self_training_avg3':
+                # 與既有行為一致：checkpoint/test-only 模式下仍先載入 pair 模型，Avg3 的正式建立流程在後段測試路徑處理
                 st_model_path = os.path.join(opt.checkpointpath, 'self_training_models', f'fold{fold}_self_training_best_pair.pth')
                 if os.path.exists(st_model_path):
                     model = torch.load(st_model_path, map_location=torch.device('cpu'))
@@ -2635,9 +2858,16 @@ def _run_main(save_path):
                                        map_location=torch.device('cpu'))
             else:
                 # 載入初始監督學習模型
-                model = torch.load(opt.checkpointpath + '/fold{}_best_pair.pth'.format(fold),
-                                   map_location=torch.device('cpu'))
-                print(f'載入初始監督學習模型: {opt.checkpointpath}/fold{fold}_best_pair.pth')
+                supervised_model_path = get_supervised_best_checkpoint_path(
+                    opt.checkpointpath,
+                    fold,
+                    opt.test_metric,
+                )
+                model = torch.load(supervised_model_path, map_location=torch.device('cpu'))
+                print(
+                    f'載入初始監督學習模型: {supervised_model_path} '
+                    f'(依據 {METRIC_TO_LABEL[opt.test_metric]})'
+                )
         if use_gpu:
             model = model.cuda()
 
@@ -2690,16 +2920,62 @@ def _run_main(save_path):
         # 1) 未指定新參數時沿用舊行為 (僅 consistency_pseudo=True 時儲存)
         # 2) --save_task_specific_checkpoints 可強制啟用
         # 3) --no_save_task_specific_checkpoints 可強制關閉
+        # 先決定「預設要不要存 emotion/cause 專用 checkpoint」，並記錄這個決定是從哪裡來的
         if opt.save_task_specific_checkpoints is None:
+            # 使用者沒有明確指定時，沿用舊行為：只有 consistency_pseudo 開啟才預設儲存
             save_task_specific_checkpoints = bool(opt.consistency_pseudo)
             save_task_specific_ckpt_source = "auto(by consistency_pseudo)"
         else:
+            # 使用者有明確指定 --save_task_specific_checkpoints / --no_save_task_specific_checkpoints
             save_task_specific_checkpoints = bool(opt.save_task_specific_checkpoints)
             save_task_specific_ckpt_source = "explicit CLI override"
+
+        # 只要訓練流程或最終測試流程有任何一處要用 emotion/cause 最佳模型，
+        # 對應的 task-specific checkpoint 就會變成必需品
+        task_specific_metric_needed = (
+            opt.initial_supervised_metric in ('emotion', 'cause')
+            or opt.self_training_main_metric in ('emotion', 'cause')
+            or (
+                opt.test_model_type in ('initial', 'self_training')
+                and opt.test_metric in ('emotion', 'cause')
+            )
+        )
+        if task_specific_metric_needed:
+            # 如果使用者明明需要 emotion/cause checkpoint，卻又明確要求不要儲存，
+            # 後面流程一定會找不到模型，所以這裡直接報錯
+            if opt.save_task_specific_checkpoints is False:
+                raise ValueError(
+                    "當 --initial_supervised_metric、--self_training_main_metric 或 --test_metric "
+                    "(搭配 initial/self_training) 使用 emotion/cause 時，"
+                    "不能同時使用 --no_save_task_specific_checkpoints，"
+                    "因為訓練/測試流程需要對應的最佳 checkpoint"
+                )
+
+            # 如果目前尚未啟用儲存，但後面流程又確實需要，就自動補開
+            if not save_task_specific_checkpoints:
+                save_task_specific_checkpoints = True
+                save_task_specific_ckpt_source = (
+                    "auto(因 initial_supervised_metric / self_training_main_metric / test_metric 使用 emotion/cause，故自動啟用)"
+                )
         print(
             f"Task-specific checkpoint 儲存設定: {save_task_specific_checkpoints} "
             f"(來源: {save_task_specific_ckpt_source})"
         )
+        print(
+            f"初始監督訓練後銜接模型依據: {opt.initial_supervised_metric} "
+            f"({METRIC_TO_LABEL[opt.initial_supervised_metric]})"
+        )
+        print(
+            f"Self-training 主模型切換依據: {opt.self_training_main_metric} "
+            f"({METRIC_TO_LABEL[opt.self_training_main_metric]})"
+        )
+        if opt.test_model_type == 'self_training_avg3':
+            print("最終測試模型依據: self_training_avg3 (固定平均 emotion/cause/pair，忽略 test_metric)")
+        else:
+            print(
+                f"最終測試模型依據: {opt.test_model_type} + {opt.test_metric} "
+                f"({METRIC_TO_LABEL[opt.test_metric]})"
+            )
         current_self_training_model_source = "目前記憶體中的 model (未指定來源路徑)"
         optimizer = torch.optim.AdamW(model.parameters(), lr=opt.learning_rate, weight_decay=opt.weight_decay)
         # 每折初始化訓練步驟記錄檔，與 UECA_CE_val_version.py 的行為一致
@@ -2714,12 +2990,19 @@ def _run_main(save_path):
         # 檢查是否要跳過初始訓練
         if opt.skip_initial_training:
             print("=== 跳過初始監督訓練，直接載入預訓練模型 ===")
-            pretrained_model_path = os.path.join(opt.save_path, f'fold{fold}_best_pair.pth')
+            pretrained_model_path = get_supervised_best_checkpoint_path(
+                opt.save_path,
+                fold,
+                opt.initial_supervised_metric,
+            )
             if os.path.exists(pretrained_model_path):
                 model = torch.load(pretrained_model_path, map_location=torch.device('cuda' if use_gpu else 'cpu'))
                 if use_gpu:
                     model = model.cuda()
-                print(f"已載入預訓練模型: {pretrained_model_path}")
+                print(
+                    f"已載入預訓練模型: {pretrained_model_path} "
+                    f"(依據 {METRIC_TO_LABEL[opt.initial_supervised_metric]})"
+                )
                 current_self_training_model_source = pretrained_model_path
                 
                 # 直接跳到 self-training 部分（資料夾會在後面統一建立）
@@ -2747,12 +3030,33 @@ def _run_main(save_path):
             all_test_emotion_gt = torch.tensor([])
             all_test_cause_gt = torch.tensor([])
             all_test_pair_gt = torch.tensor([])
+            final_eval_split = opt.final_eval_split
+            final_eval_loader = testloader if final_eval_split == 'test' else valloader
+            final_eval_doc_ids = NLP_Dataset['test'].doc_id if final_eval_split == 'test' else NLP_Dataset['val'].doc_id
+            final_eval_output_name = 'test_results.txt' if final_eval_split == 'test' else 'val_results.txt'
+            final_eval_eval_filename = f"{final_eval_split}_evaluation_fold{fold}.txt"
+
+            if opt.test_model_type == 'self_training_avg3':
+                avg_result = build_averaged_model_for_fold(
+                    save_path=eval_checkpoint_root,
+                    fold=fold,
+                    weights=None,
+                    map_location='cpu',
+                    repo_root=os.path.dirname(os.path.dirname(eval_checkpoint_root)),
+                    averaging_method='simple_mean',
+                )
+                model = avg_result['model']
+                if use_gpu:
+                    model = model.cuda()
+                print(f"[Test-only] 使用 Avg3 最終模型進行 {final_eval_split} 評估")
+                print(f"[Test-only] Avg3 來源模型: {avg_result['checkpoint_paths']}")
+
             model.eval()
             
             # 將結果儲存到實驗資料夾而不是 save_path
-            output_file_path = os.path.join(opt.experiment_output_dir, 'test_results.txt')
+            output_file_path = os.path.join(opt.experiment_output_dir, final_eval_output_name)
             with torch.no_grad(), open(output_file_path, 'w', encoding='utf-8') as output_file:
-                for idx, data in enumerate(testloader):
+                for idx, data in enumerate(final_eval_loader):
                     x_bert, y_bert, label, mask_label, gt_emotion, gt_cause, gt_pair, _ = data
                     if use_gpu:
                         x_bert = x_bert.cuda()
@@ -2773,9 +3077,10 @@ def _run_main(save_path):
 
                 p_emotion, r_emotion, f_emotion, p_cause, r_cause, f_cause, p_pair, r_pair, f_pair = crf_prompt(
                     all_test_logits, all_test_label, all_test_x_bert, all_test_emotion_gt, all_test_cause_gt,
-                    all_test_pair_gt, save_path=os.path.join(opt.experiment_output_dir, f"test_evaluation_fold{fold}.txt"))
-                save_mask_predictions(all_test_logits, all_test_x_bert, tokenizer, NLP_Dataset['test'].doc_id, 
-                                    fold=fold, output_dir=opt.experiment_output_dir)
+                    all_test_pair_gt, save_path=os.path.join(opt.experiment_output_dir, final_eval_eval_filename))
+                save_mask_predictions(all_test_logits, all_test_x_bert, tokenizer, final_eval_doc_ids,
+                                    fold=fold, output_dir=opt.experiment_output_dir,
+                                    base_filename='text_result' if final_eval_split == 'test' else 'val_text_result')
                 print(
                     "e_p: {:.4f} e_r: {:.4f} e_f: {:.4f} c_p: {:.4f} c_r: {:.4f} c_f: {:.4f}"
                     " pair_p: {:.4f} pair_r: {:.4f} pair_f: {:.4f}".format(
@@ -3034,11 +3339,19 @@ def _run_main(save_path):
                 f.write(f"Best F1 achieved: {max_f1_pair:.4f}\n")  # 應該用 max_f1_pair 而不是 best_val_f1
 
             # ====== 當前第 i 折最佳模型的路徑 ======
-            model_path = save_path + '/' + 'fold{}_best_pair.pth'.format(fold)
+            model_path = get_supervised_best_checkpoint_path(save_path, fold, opt.initial_supervised_metric)
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(
+                    f"找不到初始監督訓練最佳模型: {model_path} "
+                    f"(initial_supervised_metric={opt.initial_supervised_metric})"
+                )
             model = torch.load(model_path, map_location=torch.device('cuda' if use_gpu else 'cpu'))
             if use_gpu:
                 model = model.cuda()
-            print(f"已載入初始化監督訓練的最佳模型: {model_path}")
+            print(
+                f"已載入初始化監督訓練的最佳模型: {model_path} "
+                f"(依據 {METRIC_TO_LABEL[opt.initial_supervised_metric]})"
+            )
             current_self_training_model_source = model_path
             
             # 輸出當前 fold 的早停資訊
@@ -3076,7 +3389,7 @@ def _run_main(save_path):
         st_max_f1_pair = -1.0
         st_max_p_pair = -1.0
         st_max_r_pair = -1.0
-        
+        # Self-training 的每輪迴圈，根據 opt.self_training_rounds 決定要跑幾輪
         for self_round in range(opt.self_training_rounds):
             round_start_time = time.time()  # 記錄每輪開始時間
             is_dynamic_round0_mode = (
@@ -3125,18 +3438,27 @@ def _run_main(save_path):
             
             # 如果不是第一輪 self-training，載入前一輪的最佳模型
             if self_round > 0:
-                st_save_dir = os.path.join(save_path, 'self_training_models')
-                prev_best_model_path = os.path.join(st_save_dir, f'fold{fold}_self_training_best_pair.pth')
+                prev_best_model_path = get_self_training_best_checkpoint_path(
+                    save_path,
+                    fold,
+                    opt.self_training_main_metric,
+                )
                 if os.path.exists(prev_best_model_path):
                     model = torch.load(prev_best_model_path, map_location=torch.device('cuda' if use_gpu else 'cpu'))
                     if use_gpu:
                         model = model.cuda()
-                    print(f"  已載入前一輪最佳模型: {prev_best_model_path}")
+                    print(
+                        f"  已載入前一輪最佳模型: {prev_best_model_path} "
+                        f"(依據 {METRIC_TO_LABEL[opt.self_training_main_metric]})"
+                    )
                     current_self_training_model_source = prev_best_model_path
                     # 重新初始化優化器，使用新模型的參數
                     optimizer = torch.optim.AdamW(model.parameters(), lr=opt.learning_rate, weight_decay=opt.weight_decay)
                 else:
-                    print(f"  找不到前一輪最佳模型: {prev_best_model_path}，繼續使用當前模型")
+                    print(
+                        f"  找不到前一輪最佳模型: {prev_best_model_path}，"
+                        "繼續使用當前模型"
+                    )
 
             print(f"  本輪未標註樣本主模型來源: {current_self_training_model_source}")
             
@@ -3145,10 +3467,13 @@ def _run_main(save_path):
                 round_unlabeled_size = len(unlabeled_dataset)
                 round_pseudo_labeled_samples = []
                 round_pseudo_doc_ids = []
-                all_pseudo_predictions = []  # 收集所有pseudo預測結果用於最後保存
+                all_pseudo_predictions = []  # 收集pseudo預測結果用於最後保存
+                all_unlabeled_pseudo_predictions = []  # 收集本輪所有未標註文檔的原始 pseudo 預測
                 batch_start_idx = 0
                 pseudo_logging_entries = []
+                all_unlabeled_pseudo_logging_entries = []
                 pseudo_eval_records = []
+                all_unlabeled_pseudo_eval_records = []
                 evaluate_pseudo = opt.log_pseudo_quality and bool(pseudo_ground_truth_map) # 決定是否要進行偽標籤 vs 真實答案的比較評估，當「使用者要求紀錄品質」且「成功建立了真實答案對照表」時
                 consistency_debug_records = [] if opt.save_consistency_predictions else None
                 consistency_rejected_records = []  # 記錄被 consistency 拒絕的樣本的 GT 評估
@@ -3230,14 +3555,21 @@ def _run_main(save_path):
                     'round_pseudo_labeled_samples': round_pseudo_labeled_samples,
                     'round_pseudo_doc_ids': round_pseudo_doc_ids,
                     'all_pseudo_predictions': all_pseudo_predictions,
+                    'all_unlabeled_pseudo_predictions': all_unlabeled_pseudo_predictions,
                     'pseudo_logging_entries': pseudo_logging_entries,
+                    'all_unlabeled_pseudo_logging_entries': all_unlabeled_pseudo_logging_entries,
                     'pseudo_eval_records': pseudo_eval_records,
+                    'all_unlabeled_pseudo_eval_records': all_unlabeled_pseudo_eval_records,
                     'consistency_rejected_records': consistency_rejected_records,
                     'doc_selection_history': doc_selection_history,
                     'pseudo_eval_correct': 0,
                     'pseudo_eval_total': 0,
                     'pseudo_eval_filtered_correct': 0,
                     'pseudo_eval_filtered_total': 0,
+                    'all_unlabeled_pseudo_eval_correct': 0,
+                    'all_unlabeled_pseudo_eval_total': 0,
+                    'all_unlabeled_pseudo_eval_filtered_correct': 0,
+                    'all_unlabeled_pseudo_eval_filtered_total': 0,
                 }
 
                 if current_selector == 'threshold':
@@ -3339,6 +3671,7 @@ def _run_main(save_path):
                                     doc_id=doc_id,
                                     consistency_debug_records=consistency_debug_records,
                                 )
+                                # 把本輪選中的樣本實際收集起來
                                 if passed and final_pseudo is not None:
                                     append_pseudo_sample_entry(
                                         pseudo_eval_state,
@@ -3420,6 +3753,13 @@ def _run_main(save_path):
                         knn_embedding_mode=opt.knn_embedding_mode,  # 使用命令列參數指定的 embedding 模式
                         return_embedding_info=True  # 取得每個樣本的 embedding 詳細資訊
                     )
+                    record_all_unlabeled_pseudo_predictions(
+                        pseudo_eval_state,
+                        unlabeled_doc_ids,
+                        unlabeled_dataset.x_bert,
+                        all_pseudo_tokens,
+                        tokenizer,
+                    )
                     
                     # ===== DEBUG: 檢查 collect_unlabeled_statistics 回傳值的形狀 =====
                     print("=" * 60)
@@ -3452,9 +3792,17 @@ def _run_main(save_path):
                     # 挑選數量為有標籤資料量的倍數 (opt.nest_multiplier)，至少挑 1 筆
                     num_to_select = max(1, int(opt.nest_multiplier * num_labeled)) if num_unlabeled > 0 else 0
 
+                    if 0 < num_unlabeled < num_to_select:
+                        print(
+                            f"  剩餘未標註樣本數 {num_unlabeled} 少於本輪目標選樣數 {num_to_select}，"
+                            "自訓練提前停止"
+                        )
+                        break
+
                     if num_to_select > 0:
                         # 4. 執行 NeST 演算法進行樣本挑選
                         # 根據特徵相似度與模型預測的一致性來選擇樣本
+                        # Select \hat{X}_u^t by Eq.4 
                         nest_result = select_samples_and_generate_pseudo_labels(
                             labeled_features=labeled_features,
                             labeled_true_labels={'emotion': labeled_emotion, 'cause': labeled_cause, 'emotion_clause': labeled_emotion_clause, 'cause_clause': labeled_cause_clause},
@@ -3938,6 +4286,13 @@ def _run_main(save_path):
                         debug=False, doc_ids=unlabeled_doc_ids,
                         knn_embedding_mode='cls'  # 隨機選擇不需要特殊 embedding
                     )
+                    record_all_unlabeled_pseudo_predictions(
+                        pseudo_eval_state,
+                        unlabeled_doc_ids,
+                        unlabeled_dataset.x_bert,
+                        all_pseudo_tokens,
+                        tokenizer,
+                    )
                     
                     # 2. 計算本輪預計挑選的樣本數量 (與 NeST 使用相同參數)
                     num_labeled = len(NLP_Dataset['train'])
@@ -4129,6 +4484,34 @@ def _run_main(save_path):
                             json.dump(pseudo_logging_entries, fjson, ensure_ascii=False, indent=2)
                         print(f"  偽標籤樣本紀錄已寫入: {pseudo_json_path}")
 
+                if all_unlabeled_pseudo_predictions:
+                    selected_doc_id_set = set(round_pseudo_doc_ids)
+                    for entry in all_unlabeled_pseudo_logging_entries:
+                        entry['selected_for_training'] = entry['doc_id'] in selected_doc_id_set
+
+                    all_unlabeled_x_bert = [item['x_bert'] for item in all_unlabeled_pseudo_predictions]
+                    all_unlabeled_pseudo_labels = [item['pseudo_labels'] for item in all_unlabeled_pseudo_predictions]
+                    all_unlabeled_doc_ids = [item['doc_id'] for item in all_unlabeled_pseudo_predictions]
+
+                    save_mask_predictions(
+                        logits=None,
+                        x_bert=all_unlabeled_x_bert,
+                        tokenizer=tokenizer,
+                        doc_ids=all_unlabeled_doc_ids,
+                        fold=fold,
+                        output_dir=pseudo_results_dir,
+                        base_filename=f"all_unlabeled_pseudo_text_result_round{self_round + 1}",
+                        pseudo_labels=all_unlabeled_pseudo_labels
+                    )
+
+                    all_unlabeled_json_path = os.path.join(
+                        pseudo_results_dir,
+                        f"all_unlabeled_pseudo_predictions_fold{fold}_round{self_round + 1}.json",
+                    )
+                    with open(all_unlabeled_json_path, "w", encoding="utf-8") as fjson:
+                        json.dump(all_unlabeled_pseudo_logging_entries, fjson, ensure_ascii=False, indent=2)
+                    print(f"  全部未標註偽標籤紀錄已寫入: {all_unlabeled_json_path}")
+
                 if opt.log_pseudo_quality:
                     if not pseudo_eval_records and pseudo_logging_entries and not evaluate_pseudo:
                         pseudo_eval_records.append({
@@ -4164,12 +4547,85 @@ def _run_main(save_path):
                         print("  偽標籤錯誤率(排除非非无): 無剩餘可比較資料")
                     print(f"  偽標籤詳細紀錄輸出至: {report_path}")
 
+                    if not all_unlabeled_pseudo_eval_records and all_unlabeled_pseudo_logging_entries and not evaluate_pseudo:
+                        raise RuntimeError(
+                            "全部未標註 pseudo 評估失敗: 已收集全部偽標籤，但本輪未啟用 ground truth 比對"
+                        )
+
+                    selected_doc_id_set = set(round_pseudo_doc_ids)
+                    comparable_all_unlabeled_records = [
+                        rec for rec in all_unlabeled_pseudo_eval_records if not rec.get('skip_reason')
+                    ]
+                    all_unlabeled_full_correct_docs = sum(
+                        1 for rec in comparable_all_unlabeled_records if rec.get('fully_correct')
+                    )
+                    unselected_full_correct_docs = sum(
+                        1 for rec in comparable_all_unlabeled_records
+                        if rec.get('fully_correct') and rec['doc_id'] not in selected_doc_id_set
+                    )
+                    selected_full_correct_docs = sum(
+                        1 for rec in comparable_all_unlabeled_records
+                        if rec.get('fully_correct') and rec['doc_id'] in selected_doc_id_set
+                    )
+                    all_unlabeled_pair_correct_docs = sum(
+                        1 for rec in comparable_all_unlabeled_records if rec.get('pair_fully_correct')
+                    )
+                    unselected_pair_correct_docs = sum(
+                        1 for rec in comparable_all_unlabeled_records
+                        if rec.get('pair_fully_correct') and rec['doc_id'] not in selected_doc_id_set
+                    )
+                    selected_pair_correct_docs = sum(
+                        1 for rec in comparable_all_unlabeled_records
+                        if rec.get('pair_fully_correct') and rec['doc_id'] in selected_doc_id_set
+                    )
+                    all_unlabeled_total_errors = (
+                        pseudo_eval_state['all_unlabeled_pseudo_eval_total'] -
+                        pseudo_eval_state['all_unlabeled_pseudo_eval_correct']
+                    )
+
+                    all_unlabeled_report_path = write_pseudo_label_evaluation_report(
+                        output_dir=pseudo_results_dir,
+                        fold=fold,
+                        round_idx=self_round,
+                        records=all_unlabeled_pseudo_eval_records,
+                        total_tokens=pseudo_eval_state['all_unlabeled_pseudo_eval_total'],
+                        correct_tokens=pseudo_eval_state['all_unlabeled_pseudo_eval_correct'],
+                        filtered_total_tokens=pseudo_eval_state['all_unlabeled_pseudo_eval_filtered_total'],
+                        filtered_correct_tokens=pseudo_eval_state['all_unlabeled_pseudo_eval_filtered_correct'],
+                        tokenizer=tokenizer,
+                        summary=pseudo_gt_summary,
+                        report_filename=f"all_unlabeled_pseudo_evaluation_fold{fold}_round{self_round + 1}.txt",
+                        extra_summary_lines=[
+                            f"全部未標註 pseudo 錯誤 mask 數量: {all_unlabeled_total_errors}",
+                            f"全部未標註中，整篇 pseudo 全對的文檔數: {all_unlabeled_full_correct_docs}",
+                            f"已被選中且整篇 pseudo 全對的文檔數: {selected_full_correct_docs}",
+                            f"未被選中但整篇 pseudo 全對的文檔數: {unselected_full_correct_docs}",
+                            f"全部未標註中，pair 偽標籤全對的文檔數: {all_unlabeled_pair_correct_docs}",
+                            f"已被選中且 pair 偽標籤全對的文檔數: {selected_pair_correct_docs}",
+                            f"未被選中但 pair 偽標籤全對的文檔數: {unselected_pair_correct_docs}",
+                            f"未被選中的文檔數: {len(all_unlabeled_pseudo_predictions) - len(selected_doc_id_set)}",
+                        ],
+                    )
+                    if pseudo_eval_state['all_unlabeled_pseudo_eval_total'] > 0:
+                        all_unlabeled_error_rate = 1.0 - (
+                            pseudo_eval_state['all_unlabeled_pseudo_eval_correct'] /
+                            pseudo_eval_state['all_unlabeled_pseudo_eval_total']
+                        )
+                        print(f"  全部未標註偽標籤錯誤率 (round {self_round + 1}): {all_unlabeled_error_rate:.4f}")
+                        print(f"  全部未標註偽標籤錯誤 mask 數量: {all_unlabeled_total_errors}")
+                        print(f"  未被選中但整篇 pseudo 全對的文檔數: {unselected_full_correct_docs}")
+                        print(f"  未被選中但 pair 偽標籤全對的文檔數: {unselected_pair_correct_docs}")
+                    else:
+                        print("  全部未標註偽標籤錯誤率: 無可比較之真實答案")
+                    print(f"  全部未標註偽標籤詳細紀錄輸出至: {all_unlabeled_report_path}")
+
             # 建立 pseudo-labeled dataset
             if len(round_pseudo_labeled_samples) == 0:
                 print("  本輪未選出偽標籤樣本，自訓練提前停止")
                 break
-
+            
             pseudo_dataset = PseudoLabeledDataset(round_pseudo_labeled_samples, round_pseudo_doc_ids)
+            # 本輪的 \hat{X}_u^t
             pseudo_dataset_list.append(pseudo_dataset)
             total_pseudo_samples = sum(len(ds) for ds in pseudo_dataset_list)
             print(f"  新增偽標籤資料集，共 {len(pseudo_dataset)} 筆樣本，累計偽標籤樣本 {total_pseudo_samples}")
@@ -4606,10 +5062,11 @@ def _run_main(save_path):
             avg_state_dict_path = os.path.join(avg_output_dir, f'fold{fold}_self_training_best_avg3_state_dict.pth')
             try:
                 avg_result = build_averaged_model_for_fold(
-                    save_path=save_path,
+                    save_path=eval_checkpoint_root,
                     fold=fold,
                     weights=None,
                     map_location='cpu',
+                    repo_root=os.path.dirname(os.path.dirname(eval_checkpoint_root)),
                     averaging_method='simple_mean',
                 )
                 save_averaged_model(
@@ -4629,19 +5086,34 @@ def _run_main(save_path):
                     f"建立 Avg3 模型失敗 (fold={fold})，已中止執行: {exc}"
                 ) from exc
         elif opt.test_model_type == 'self_training':
-            candidate_path = os.path.join(save_path, 'self_training_models', f'fold{fold}_self_training_best_pair.pth')
+            candidate_path = get_test_checkpoint_path(
+                eval_checkpoint_root,
+                fold,
+                opt.test_model_type,
+                opt.test_metric,
+            )
             if os.path.exists(candidate_path):
                 test_checkpoint_path = candidate_path
             else:
-                test_checkpoint_path = os.path.join(save_path, f'fold{fold}_best_pair.pth')
-                print(f"找不到 self-training 模型 {candidate_path}，改用初始監督模型進行測試評估")
+                raise FileNotFoundError(
+                    f"找不到 self-training 測試模型: {candidate_path}，"
+                    f"已中止執行 (test_metric={opt.test_metric})"
+                )
         else:
-            test_checkpoint_path = os.path.join(save_path, f'fold{fold}_best_pair.pth')
+            test_checkpoint_path = get_test_checkpoint_path(
+                eval_checkpoint_root,
+                fold,
+                opt.test_model_type,
+                opt.test_metric,
+            )
 
         if opt.test_model_type != 'self_training_avg3':
             if os.path.exists(test_checkpoint_path):
                 test_model = torch.load(test_checkpoint_path, map_location=torch.device('cuda' if use_gpu else 'cpu'))
-                print(f"載入測試用模型: {test_checkpoint_path}")
+                print(
+                    f"載入測試用模型: {test_checkpoint_path} "
+                    f"(依據 {METRIC_TO_LABEL[opt.test_metric]})"
+                )
                 if use_gpu:
                     test_model = test_model.cuda()
             else:
@@ -4649,14 +5121,18 @@ def _run_main(save_path):
                     f"找不到測試模型 {test_checkpoint_path}，已中止執行"
                 )
 
+        final_eval_split = opt.final_eval_split
+        final_eval_loader = testloader if final_eval_split == 'test' else valloader
+        final_eval_doc_ids = NLP_Dataset['test'].doc_id if final_eval_split == 'test' else NLP_Dataset['val'].doc_id
+
         test_metrics, test_loss = evaluate_split(
             test_model,
-            testloader,
+            final_eval_loader,
             fold,
-            "test",
+            final_eval_split,
             save_dir=save_path,
             tokenizer=tokenizer,
-            doc_ids=NLP_Dataset['test'].doc_id,
+            doc_ids=final_eval_doc_ids,
             save_predictions=True,
             prediction_basename="text_result",
         )
@@ -4666,9 +5142,9 @@ def _run_main(save_path):
          test_p_pair, test_r_pair, test_f_pair) = test_metrics
 
         if test_loss is not None:
-            print(f"Fold {fold} test result (loss {test_loss:.4f}):")
+            print(f"Fold {fold} {final_eval_split} result (loss {test_loss:.4f}):")
         else:
-            print(f"Fold {fold} test result:")
+            print(f"Fold {fold} {final_eval_split} result:")
         print(
             "e_p: {:.4f} e_r: {:.4f} e_f: {:.4f} c_p: {:.4f} c_r: {:.4f} c_f: {:.4f}"
             " pair_p: {:.4f} pair_r: {:.4f} pair_f: {:.4f}".format(

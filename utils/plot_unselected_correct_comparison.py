@@ -411,14 +411,57 @@ LABEL_FIXED_COLORS = {
     'consistency_only_all_equal_CE': '#1f77b4',
     'nest_k5_knncause_clause_mask_nestmul7_consistency_CE': '#2ca02c',
     'nest_k5_knncause_clause_mask_nestmul7_CE': '#ff7f0e',
+    'nest (mult=1, subtask3)': '#1f77b4',
+    '(mult=1, subtask3)': '#1f77b4',
+    'nest (mult=1)': '#2ca02c',
+    '(mult=1)': '#2ca02c',
+    'mult=1': '#2ca02c',
+    'nest (mult=1.5, subtask3)': '#ff7f0e',
+    '(mult=1.5, subtask3)': '#ff7f0e',
+    'nest (mult=1.5)': '#9467bd',
+    '(mult=1.5)': '#9467bd',
+    'mult=1.5': '#9467bd',
 }
 
 
 def normalize_label_for_color(label: str) -> str:
     """將標籤正規化後再做固定配色比對。"""
-    s = label.strip()
+    s = re.sub(r'\s+', ' ', label.strip().lower())
     s = re.sub(r'_consistency_somc_', '_somc_', s)
     return s
+
+
+def simplify_display_label(label: str) -> str:
+    """移除 x 軸標籤前面的 NeST 前綴。"""
+    simplified = re.sub(r'^\s*NeST\s*', '', label, flags=re.IGNORECASE).strip()
+    return simplified or label
+
+
+def extract_mult_group(label: str) -> str:
+    match = re.search(r'mult\s*=\s*([\d.]+)', label, flags=re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return normalize_label_for_color(label)
+
+
+def build_grouped_bar_positions(labels: list[str], intra_gap: float = 0.78, inter_gap: float = 1.58) -> np.ndarray:
+    if not labels:
+        return np.array([])
+
+    positions = [0.0]
+    prev_group = extract_mult_group(labels[0])
+    for label in labels[1:]:
+        current_group = extract_mult_group(label)
+        positions.append(positions[-1] + (intra_gap if current_group == prev_group else inter_gap))
+        prev_group = current_group
+    return np.array(positions, dtype=np.float32)
+
+
+def style_y_grid(ax) -> None:
+    ax.set_axisbelow(False)
+    ax.grid(True, axis='y', linestyle='--', linewidth=1.1, alpha=0.95, color='#ffffff')
+    for gridline in ax.get_ygridlines():
+        gridline.set_zorder(10)
 
 
 def get_color_by_label(label: str, idx: int) -> str:
@@ -495,16 +538,17 @@ def plot_comparison(
 
     # 單一 metric 時採用與 pair_m1_multi_seed_comparison_f1.png 相同視覺樣式
     if n_metrics == 1:
-        x = np.arange(n_groups)
+        display_labels = [simplify_display_label(label) for label in labels]
+        x = build_grouped_bar_positions(display_labels)
         values = [group_means[g][0] for g in range(n_groups)]
         stds = [group_stds[g][0] for g in range(n_groups)]
-        colors = assign_distinct_colors(labels)
+        colors = assign_distinct_colors(display_labels)
 
         fig, ax = plt.subplots(figsize=(14, 7))
         fig.patch.set_facecolor('#DDDDDD')
         ax.set_facecolor('#DDDDDD')
 
-        bar_kwargs = dict(color=colors, edgecolor='white', linewidth=1.5, width=0.5)
+        bar_kwargs = dict(color=colors, edgecolor='white', linewidth=1.5, width=0.78, zorder=2)
         if not no_std_bar:
             bar_kwargs["yerr"] = stds
             bar_kwargs["capsize"] = 5
@@ -527,10 +571,11 @@ def plot_comparison(
 
         if title is None:
             title = f"{METRIC_DISPLAY_SHORT[metrics[0]]}"
-        ax.set_title(title, fontsize=22, fontweight='bold', fontname=FONT_ENGLISH)
+        ax.set_title(title, fontsize=22, fontweight='bold', fontname=FONT_CHINESE)
         ax.set_ylabel('Score (%)', fontsize=18, fontname=FONT_ENGLISH)
         ax.set_xticks(x)
-        ax.set_xticklabels(labels, fontsize=12, fontname=FONT_ENGLISH, rotation=15, ha='right')
+        ax.set_xticklabels(display_labels, fontsize=12, fontname=FONT_ENGLISH, rotation=15, ha='right')
+        ax.margins(x=0.05)
 
         y_max = max(values) + (max(stds) if stds else 0)
         ax.set_ylim(0, y_max + 12)
@@ -539,7 +584,7 @@ def plot_comparison(
             lbl.set_fontsize(16)
             lbl.set_fontname(FONT_ENGLISH)
 
-        ax.grid(True, axis='y', linestyle='--', alpha=0.7)
+        style_y_grid(ax)
         plt.tight_layout()
         fig.savefig(str(output_path), dpi=150, bbox_inches='tight')
         print(f"圖片已儲存: {output_path}")

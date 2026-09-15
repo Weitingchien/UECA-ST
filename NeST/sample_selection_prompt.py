@@ -130,7 +130,7 @@ def select_samples_and_generate_pseudo_labels(
         labeled_probs_array = np.ascontiguousarray(_to_numpy(labeled_true_labels).astype(np.float32))  # 標註分佈轉為 numpy 陣列
         unlabeled_probs_array = np.ascontiguousarray(_to_numpy(unlabeled_predictions).astype(np.float32))  # 未標註分佈轉為 numpy 陣列
     # 來源: https://github.com/facebookresearch/faiss/wiki/Getting-started
-    # L2距離: 兩個向量之間的平方距離
+    # Squared Euclidean distance: 兩個向量之間的距離取平方
     # labeled_features_np 的形狀是 [num_labeled, hidden_size]
     index = faiss.IndexFlatL2(labeled_features_np.shape[1])  # 建立 L2 距離的平面索引，維度等於 CLS 向量長度(隱藏層維度: 768維)
     index.add(labeled_features_np)  # 將標註資料的 CLS 向量加入索引，作為 KNN 候選點
@@ -252,14 +252,40 @@ def select_samples_and_generate_pseudo_labels(
 
     max_val = np.max(current_val)  # 取出當前分數的最大值，作為 W
     weights = max_val - current_val  # 越接近最大值代表 divergence 越低，權重越大
-    probabilities = weights / np.sum(weights)  # 將權重正規化成機率分佈
+    sum_weights = float(np.sum(weights))
+    if np.isfinite(sum_weights) and sum_weights > 0:
+        probabilities = weights / sum_weights  # 將權重正規化成機率分佈
+    else:
+        probabilities = np.zeros_like(weights, dtype=np.float64)
 
     # 計算有效樣本數（機率 > 0 的樣本），避免要求的樣本數超過可用數量
     num_nonzero = int(np.sum(probabilities > 0))
     num_samples = min(num_samples, len(current_val), num_nonzero) # 確保抽樣數量<=總樣本數、抽樣數量<=機率非零的樣本數
     
     if num_samples == 0:
-        raise ValueError(f"沒有可選的樣本: len(current_val)={len(current_val)}, num_nonzero={num_nonzero}, sum(weights)={np.sum(weights)}")
+        empty_selected_indices = np.array([], dtype=np.int64)
+        empty_pseudo_labels = torch.empty((0,), dtype=torch.long)
+
+        if return_details:
+            detailed_info = {
+                'neighbor_indices': neighbor_indices,  # [n_unlabeled, k] - 每個未標記樣本的 k 個鄰居在 labeled 中的索引
+                'neighbor_distances': faiss_distances, # [n_unlabeled, k] - 每個未標記樣本到其 k 個鄰居的 L2 平方距離
+                'divergence_details': divergence_details,  # D_u, D_l 等詳細資訊
+                'divergence': divergence,              # 本輪計算的原始散度 (不含 EMA 平滑)
+                'beta': beta,
+                'weights': weights,                    # [n_unlabeled] - 論文 Eq.11: W - μ^(t)(x_j)
+                'probabilities': probabilities,        # [n_unlabeled] - 正規化後的抽樣機率；若無法形成有效分佈則全為 0
+                'max_divergence': max_val,             # W = max(μ^(t)(x)) 正規化因子
+                'current_val_dict': current_val_dict,  # {doc_id: ema_score} - 供下一輪使用的 EMA dict
+                'selection_skipped': True,
+                'selection_skip_reason': f"沒有可選的樣本: len(current_val)={len(current_val)}, num_nonzero={num_nonzero}, sum(weights)={sum_weights}",
+            }
+            if labeled_doc_ids is not None:
+                labeled_doc_ids_array = np.array(labeled_doc_ids)
+                detailed_info['neighbor_doc_ids'] = labeled_doc_ids_array[neighbor_indices]
+            return empty_selected_indices, empty_pseudo_labels, current_val, detailed_info
+
+        return empty_selected_indices, empty_pseudo_labels, current_val
     
     selected_indices = np.random.choice(
         np.arange(len(current_val)),

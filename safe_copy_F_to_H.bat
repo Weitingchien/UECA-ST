@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-rem Conservative copy workflow for long paths: copy F:\<folder> -> H:\<folder>, keep source.
+rem Conservative copy workflow for long paths: copy F:\<folder> -> H:\ep_split10_t1te1v1_u7_disjoint\<folder>, keep source.
 
 echo ==============================================
 echo Long-path safe copy (NO source deletion)
@@ -9,10 +9,13 @@ echo ==============================================
 echo.
 
 set "SRC_ROOT=F:\experiments\"
-set "DST_ROOT=H:\"
+set "DST_ROOT=H:\ep_split10_t1te1v1_u7_disjoint\"
+set "SRC_ENTER_DEFAULT=F:\experiments\ep_split10_t1te1v1_u7_disjoint"
 set "ENABLE_DRYRUN=0"
 set "NO_OVERWRITE=1"
 set "LOG_DIR=%~dp0robocopy_log"
+set "RUN_ID=%RANDOM%%RANDOM%"
+set /a LOG_SEQ=0
 set /a VERIFY_TOTAL=0
 set /a VERIFY_PASS=0
 set /a VERIFY_FAIL=0
@@ -24,6 +27,37 @@ set "ROBO_EXTRA="
 if "%NO_OVERWRITE%"=="1" (
   rem Skip files that already exist at destination (regardless of timestamp)
   set "ROBO_EXTRA=/XC /XN /XO"
+)
+
+echo Default source parent: %SRC_ROOT%
+set "IN="
+set /p IN=Press Enter to use [%SRC_ENTER_DEFAULT%], or input source parent path: 
+if "%IN%"=="\" (
+  echo [WARN] Single "\" is not a valid source parent here. Using Enter default.
+  set "IN="
+)
+if "%IN%"=="" (
+  set "SRC_ROOT=%SRC_ENTER_DEFAULT%"
+) else (
+  set "SRC_ROOT=%IN%"
+)
+if not "%SRC_ROOT:~-1%"=="\" set "SRC_ROOT=%SRC_ROOT%\"
+
+echo Fixed target parent: %DST_ROOT%
+if not "%DST_ROOT:~-1%"=="\" set "DST_ROOT=%DST_ROOT%\"
+
+echo.
+if not exist "%SRC_ROOT%" (
+  echo [ERROR] Source parent does not exist: %SRC_ROOT%
+  exit /b 1
+)
+if not exist "%DST_ROOT%" (
+  echo [INFO] Target parent does not exist. Creating: %DST_ROOT%
+  mkdir "%DST_ROOT%"
+  if errorlevel 1 (
+    echo [ERROR] Failed to create target parent: %DST_ROOT%
+    exit /b 1
+  )
 )
 
 if "%ENABLE_DRYRUN%"=="1" (
@@ -40,37 +74,49 @@ echo.
 
 > "%REPORT%" echo Folder verification report
 >> "%REPORT%" echo Generated at %DATE% %TIME%
+>> "%REPORT%" echo Source parent: %SRC_ROOT%
+>> "%REPORT%" echo Target parent: %DST_ROOT%
 >> "%REPORT%" echo.
 
-call :pick_folder 1 FOLDER1
-if errorlevel 1 exit /b 1
+set /a COUNT=0
+echo Input folder names to copy from source parent: %SRC_ROOT%
+echo Leave empty and press Enter to start copying.
+:collect
+set "NAME="
+set /a NEXT_INDEX=COUNT+1
+set /p NAME=Folder name #!NEXT_INDEX!: 
+if "%NAME%"=="" goto begin_copy
+if not exist "%SRC_ROOT%%NAME%" (
+  echo [WARN] Not found under source root: %NAME%
+  goto collect
+)
+if not exist "%SRC_ROOT%%NAME%\" (
+  echo [WARN] This is not a folder, skipped: %NAME%
+  goto collect
+)
+call :is_duplicate "%NAME%" ALREADY_ADDED
+if /I "!ALREADY_ADDED!"=="1" (
+  echo [WARN] Folder already added: %NAME%
+  goto collect
+)
+set /a COUNT+=1
+set "ITEM_!COUNT!=%NAME%"
+echo [ADD] %NAME%
+goto collect
 
-call :pick_folder 2 FOLDER2 OPTIONAL
-if errorlevel 1 exit /b 1
-
-if not "%FOLDER2%"=="" (
-  if /I "%FOLDER1%"=="%FOLDER2%" (
-    echo [ERROR] Folder 1 and Folder 2 are the same. Please choose two different folders.
-    exit /b 1
-  )
+:begin_copy
+if %COUNT% EQU 0 (
+  echo [ERROR] No folders to copy.
+  exit /b 1
 )
 
-set /a TOTAL_COPY_STEPS=1
-if not "%FOLDER2%"=="" set /a TOTAL_COPY_STEPS=2
-set /a COPY_STEP=0
-
-set /a COPY_STEP+=1
-echo [PROGRESS] Copy step %COPY_STEP%/%TOTAL_COPY_STEPS%: %FOLDER1%
-call :copy_one "%FOLDER1%"
-if errorlevel 1 exit /b 1
-
-if not "%FOLDER2%"=="" (
-  set /a COPY_STEP+=1
-  echo [PROGRESS] Copy step %COPY_STEP%/%TOTAL_COPY_STEPS%: %FOLDER2%
-  call :copy_one "%FOLDER2%"
+echo.
+echo Starting copy for %COUNT% folders...
+for /L %%I in (1,1,%COUNT%) do (
+  set "CURRENT=!ITEM_%%I!"
+  echo [PROGRESS] Copy step %%I/%COUNT%: !CURRENT!
+  call :copy_one "!CURRENT!"
   if errorlevel 1 exit /b 1
-) else (
-  echo [INFO] Folder 2 skipped.
 )
 
 echo.
@@ -91,8 +137,8 @@ exit /b 0
 set "NAME=%~1"
 set "SRC=%SRC_ROOT%%NAME%"
 set "DST=%DST_ROOT%%NAME%"
-set "LOG=%LOG_DIR%\robocopy_%NAME::=_%_%DATE:/=-%_%TIME::=-%.log"
-set "LOG=%LOG: =0%"
+set /a LOG_SEQ+=1
+set "LOG=%LOG_DIR%\robocopy_%RUN_ID%_!LOG_SEQ!.log"
 
 echo.
 echo [CHECK] %SRC% ^> %DST%
@@ -117,7 +163,7 @@ if "%ENABLE_DRYRUN%"=="1" (
 )
 
 echo [COPY] Start copying...
-robocopy "%SRC%" "%DST%" /E /COPY:DAT /DCOPY:DAT /R:1 /W:1 /MT:16 /Z /NP /TEE /LOG+:%LOG% !ROBO_EXTRA!
+robocopy "%SRC%" "%DST%" /E /COPY:DAT /DCOPY:DAT /R:1 /W:1 /MT:16 /Z /NP /TEE /LOG:"%LOG%" !ROBO_EXTRA!
 set "RC=%ERRORLEVEL%"
 if %RC% GEQ 8 (
   echo [ERROR] Copy failed for %NAME% - robocopy code: %RC%
@@ -150,56 +196,9 @@ set "%~2=0"
 for /f %%C in ('powershell -NoProfile -Command "(Get-ChildItem -LiteralPath ''%~1'' -File -Recurse -Force -ErrorAction SilentlyContinue ^| Measure-Object).Count"') do set "%~2=%%C"
 exit /b 0
 
-:pick_folder
-set "PICK_NO=%~1"
-set "OUTVAR=%~2"
-set "OPTIONAL=%~3"
-set /a IDX=0
-
-echo.
-echo Available folders under %SRC_ROOT%
-for /f "delims=" %%D in ('dir /ad /b "%SRC_ROOT%"') do (
-  set /a IDX+=1
-  set "OPT_!IDX!=%%D"
-  echo   !IDX!. %%D
+:is_duplicate
+set "%~2=0"
+for /L %%I in (1,1,%COUNT%) do (
+  if /I "!ITEM_%%I!"=="%~1" set "%~2=1"
 )
-
-if !IDX! EQU 0 (
-  echo [ERROR] No folders found under %SRC_ROOT%
-  exit /b 1
-)
-
-echo.
-echo You can input a number or type the exact folder name.
-if /I "%OPTIONAL%"=="OPTIONAL" echo Leave empty to skip this folder.
-set "PICK="
-set /p PICK=Choose folder !PICK_NO! ^(1-!IDX!^) : 
-
-if "!PICK!"=="" (
-  if /I "%OPTIONAL%"=="OPTIONAL" (
-    set "%OUTVAR%="
-    echo [SKIP] Folder !PICK_NO! skipped.
-    exit /b 0
-  ) else (
-    echo [ERROR] Empty input.
-    exit /b 1
-  )
-)
-
-set "NAME="
-set "NONNUM="
-for /f "delims=0123456789" %%A in ("!PICK!") do set "NONNUM=%%A"
-if not defined NONNUM (
-  if !PICK! GEQ 1 if !PICK! LEQ !IDX! set "NAME=!OPT_%PICK%!"
-)
-
-if not defined NAME set "NAME=!PICK!"
-
-if not exist "%SRC_ROOT%!NAME!" (
-  echo [ERROR] Source does not exist: %SRC_ROOT%!NAME!
-  exit /b 1
-)
-
-set "%OUTVAR%=!NAME!"
-echo [SELECTED] Folder !PICK_NO!: !NAME!
 exit /b 0

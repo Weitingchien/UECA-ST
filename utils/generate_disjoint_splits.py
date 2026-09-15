@@ -18,8 +18,46 @@ import argparse
 import numpy as np
 
 def convert_to_unlabeled(doc):
-    """建立未標籤資料輸出，目前保留完整標籤資訊供後續處理使用。"""
+    """建立未標籤資料輸出，目前保留完整標籤資訊供後續處理使用"""
     return json.loads(json.dumps(doc, ensure_ascii=False))
+
+
+def flatten_blocks(blocks_list):
+    """將多個 block 展平成單一文件列表"""
+    if len(blocks_list) == 0:
+        return []
+    return np.concatenate(blocks_list).tolist()
+
+# verbose=True 開啟詳細輸出
+def build_disjoint_blocks(documents, n_splits=10, random_state=42, verbose=True):
+    """將完整 documents 打亂後切成 n_splits 個不重疊 blocks"""
+    documents_array = np.array(documents, dtype=object)
+    # 步驟 1:隨機打亂索引
+    rng = np.random.default_rng(random_state)
+    indices = np.arange(len(documents_array))
+    rng.shuffle(indices)
+    # 步驟 2: 將打亂後的索引切分為n_splits個區塊，均分成10個小陣列
+    # np.array_split 會處理總數無法被 n_splits整除的情況， 多出來的那一筆放在最前面的幾個區塊中
+    block_indices_list = np.array_split(indices, n_splits)
+    if verbose:
+        print(f"block_indices_list: {[len(block_indices) for block_indices in block_indices_list]}")
+
+    all_blocks = np.array(
+        [documents_array[block_indices] for block_indices in block_indices_list],
+        dtype=object,
+    )
+    if verbose:
+        print(f"all_blocks: {[len(block) for block in all_blocks]}")
+
+    return all_blocks
+
+
+def get_rotated_blocks(all_blocks, fold_index, verbose=True):
+    """取得指定 fold 的輪替後 blocks。"""
+    rotated_blocks = np.roll(all_blocks, -fold_index, axis=0)
+    if verbose:
+        print(f"rotated_blocks (Fold {fold_index + 1}): {[len(block) for block in rotated_blocks]}")
+    return rotated_blocks
 
 
 def parse_ecpe_txt(file_path):
@@ -158,29 +196,12 @@ def create_disjoint_rotated_splits(
     # 確保輸出資料夾存在
     os.makedirs(output_dir, exist_ok=True)
     
-    # 將 documents 轉換為 numpy array 以便於操作
-    documents_array = np.array(documents, dtype=object)
-    
-    # 步驟 1: 隨機打亂索引
-    rng = np.random.default_rng(random_state)
-    indices = np.arange(len(documents_array))
-    rng.shuffle(indices)
-    
-    # 步驟 2: 將打亂後的索引切分為 n_splits 個區塊，均分成 10 個小陣列
-    # np.array_split 會處理總數無法被 n_splits 整除的情況，多出來的那一筆放在最前面的幾個區塊中
-    block_indices_list = np.array_split(indices, n_splits)
-    print(f"block_indices_list: {[len(block_indices) for block_indices in block_indices_list]}") # block_indices_list: [75, 75, 75, 75, 75, 75, 74, 74, 74, 74]
-    
-    # 利用索引區塊去取對應的實際文檔
-    all_blocks = [documents_array[block_indices] for block_indices in block_indices_list]
-    print(f"all_blocks: {[len(block) for block in all_blocks]}") # all_blocks: [75, 75, 75, 75, 75, 75, 74, 74, 74, 74]
-    
-    # 輔助函式：用於將區塊列表 (list of blocks) 展平為單一列表 (list of docs)
-    def flatten_blocks(blocks_list):
-        if len(blocks_list) == 0:
-            return []
-        # np.concatenate 用於合併多個 numpy 陣列，然後 .tolist() 轉回標準 Python 列表
-        return np.concatenate(blocks_list).tolist()
+    all_blocks = build_disjoint_blocks(
+        documents,
+        n_splits=n_splits,
+        random_state=random_state,
+        verbose=True,
+    )
 
     # 步驟 3: 執行 n_splits 次迴圈 (Folds)
     for fold in range(n_splits):
@@ -188,11 +209,10 @@ def create_disjoint_rotated_splits(
         
         # 旋轉區塊列表 (np.roll)
         # 第 0 次 (Fold 1) 不旋轉, 第 1 次 (Fold 2) 向左旋轉 1 位, ...
-        rotated_blocks = np.roll(all_blocks, -fold, axis=0)
+        rotated_blocks = get_rotated_blocks(all_blocks, fold, verbose=True)
         # np.roll(all_blocks, -0, axis=0)  # fold=0 → [B0, B1, B2, ..., B9]  (不動)
         # np.roll(all_blocks, -1, axis=0)  # fold=1 → [B1, B2, B3, ..., B0]  (左移1位)
         # np.roll(all_blocks, -2, axis=0)  # fold=2 → [B2, B3, B4, ..., B1]  (左移2位)
-        print(f"rotated_blocks (Fold {fold_num}): {[len(block) for block in rotated_blocks]}")
         
         # 根據區塊數量分配角色
         current_idx = 0

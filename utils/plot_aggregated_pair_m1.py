@@ -62,12 +62,66 @@ LABEL_FIXED_COLORS = {
     'consistency_only_all_equal_CE': '#1f77b4',
     'nest_k5_knncause_clause_mask_nestmul7_consistency_CE': '#2ca02c',
     'nest_k5_knncause_clause_mask_nestmul7_CE': '#ff7f0e',
+    'w/o st': '#d62728',
+    'nest (mult=1, subtask3)': '#1f77b4',
+    '(mult=1, subtask3)': '#1f77b4',
+    'nest (mult=1)': '#2ca02c',
+    '(mult=1)': '#2ca02c',
+    'mult=1': '#2ca02c',
+    'nest (mult=1.5, subtask3)': '#ff7f0e',
+    '(mult=1.5, subtask3)': '#ff7f0e',
+    'nest (mult=1.5)': '#9467bd',
+    '(mult=1.5)': '#9467bd',
+    'mult=1.5': '#9467bd',
 }
+
+
+def normalize_label_for_color(label):
+    return re.sub(r'\s+', ' ', label.strip().lower())
+
+
+def simplify_display_label(label):
+    """移除 NeST 前綴，保留括號內的實驗設定。"""
+    simplified = re.sub(r'^\s*NeST\s*', '', label, flags=re.IGNORECASE).strip()
+    return simplified or label
+
+
+def extract_mult_group(label):
+    """從標籤中抽出 mult 值，供相鄰分組用。"""
+    match = re.search(r'mult\s*=\s*([\d.]+)', label, flags=re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return normalize_label_for_color(label)
+
+
+def build_grouped_bar_positions(labels, intra_gap=0.78, inter_gap=1.58):
+    """同一 mult 組內緊鄰，不同 mult 組之間保留較大空隙。"""
+    if not labels:
+        return np.array([])
+
+    positions = [0.0]
+    prev_group = extract_mult_group(labels[0])
+
+    for label in labels[1:]:
+        current_group = extract_mult_group(label)
+        step = intra_gap if current_group == prev_group else inter_gap
+        positions.append(positions[-1] + step)
+        prev_group = current_group
+
+    return np.array(positions, dtype=np.float32)
+
+
+def style_y_grid(ax):
+    ax.set_axisbelow(False)
+    ax.grid(True, linestyle='--', linewidth=1.1, alpha=0.95, color='#ffffff', axis='y')
+    for gridline in ax.get_ygridlines():
+        gridline.set_zorder(10)
 
 
 def get_color_by_label(label, idx):
     """優先使用固定顏色映射，未命中時退回循序色盤。"""
-    return LABEL_FIXED_COLORS.get(label, DISTINCT_COLORS[idx % len(DISTINCT_COLORS)])
+    normalized = normalize_label_for_color(label)
+    return LABEL_FIXED_COLORS.get(normalized, LABEL_FIXED_COLORS.get(label, DISTINCT_COLORS[idx % len(DISTINCT_COLORS)]))
 
 
 def assign_distinct_colors(labels):
@@ -77,7 +131,8 @@ def assign_distinct_colors(labels):
 
     # 先放固定映射色，保持既有語意。
     for label in labels:
-        fixed = LABEL_FIXED_COLORS.get(label)
+        normalized = normalize_label_for_color(label)
+        fixed = LABEL_FIXED_COLORS.get(normalized, LABEL_FIXED_COLORS.get(label))
         if fixed is not None:
             assigned.append(fixed)
             used.add(fixed.lower())
@@ -213,13 +268,23 @@ def parse_pair_m1_metrics_from_summary(summary_file: str):
     with open(summary_file, 'r', encoding='utf-8', errors='ignore') as f:
         content = f.read()
 
-    # 例：Pair (m1):\n  P (micro):  56.98% ± 1.45%\n  R (micro): ...\n  F1 (micro): ...
-    match = re.search(
-        r'Pair \(m1\):\s*.*?'
-        r'P \(micro\):\s*([\d.]+)%\s*±\s*([\d.]+)%\s*.*?'
-        r'R \(micro\):\s*([\d.]+)%\s*±\s*([\d.]+)%\s*.*?'
-        r'F1 \(micro\):\s*([\d.]+)%\s*±\s*([\d.]+)%',
+    # 只在「10 折累計統計結果 (Mean ± Std)」區塊中找 Pair (m1)，
+    # 避免從前面的各 seed 區塊一路跨段誤抓到 Emotion/Cause 的 micro 統計。
+    stats_section_match = re.search(
+        r'10 折累計統計結果 \(Mean ± Std\):\s*\n(.*?)(?:\n={6,}|\Z)',
         content,
+        re.DOTALL,
+    )
+    if not stats_section_match:
+        return None
+
+    stats_section = stats_section_match.group(1)
+    match = re.search(
+        r'Pair \(m1\):\s*\n'
+        r'\s*P \(micro\):\s*([\d.]+)%\s*±\s*([\d.]+)%\s*\n'
+        r'\s*R \(micro\):\s*([\d.]+)%\s*±\s*([\d.]+)%\s*\n'
+        r'\s*F1 \(micro\):\s*([\d.]+)%\s*±\s*([\d.]+)%',
+        stats_section,
         re.DOTALL,
     )
     if not match:
@@ -373,21 +438,23 @@ def plot_f1_only(all_data, labels, output_path=None, highlight_label=None, highl
     fig.patch.set_facecolor('#DDDDDD')
     ax.set_facecolor('#DDDDDD')
     
+    display_labels = [simplify_display_label(label) for label in labels]
+
     # 準備資料
     f1_means = [m['F1_mean'] for m in all_data]
     
     # 設定長條位置
-    x = np.arange(len(labels))
-    width = 0.5
+    x = build_grouped_bar_positions(display_labels)
+    width = 0.78
     
     # 繪製長條（不含誤差條），使用 DISTINCT_COLORS
-    colors = assign_distinct_colors(labels)
+    colors = assign_distinct_colors(display_labels)
     # 允許針對指定標籤覆蓋顏色，避免與其他方法撞色
-    if highlight_label and highlight_color and highlight_label in labels:
-        idx = labels.index(highlight_label)
+    if highlight_label and highlight_color and highlight_label in display_labels:
+        idx = display_labels.index(highlight_label)
         colors[idx] = highlight_color
     bars = ax.bar(x, f1_means, width,
-                  color=colors, edgecolor='white', linewidth=1.5)
+                  color=colors, edgecolor='white', linewidth=1.5, zorder=2)
     
     # 在長條上標註數值（只顯示 F1，不顯示標準差）
     for i, (bar, mean) in enumerate(zip(bars, f1_means)):
@@ -404,7 +471,8 @@ def plot_f1_only(all_data, labels, output_path=None, highlight_label=None, highl
     
     # 設定 X 軸
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=12, fontname=FONT_ENGLISH, rotation=15, ha='right')
+    ax.set_xticklabels(display_labels, fontsize=12, fontname=FONT_ENGLISH, rotation=15, ha='right')
+    ax.margins(x=0.05)
     
     # 設定 Y 軸範圍
     max_val = max(f1_means)
@@ -414,7 +482,7 @@ def plot_f1_only(all_data, labels, output_path=None, highlight_label=None, highl
         label.set_fontsize(16)
         label.set_fontname(FONT_ENGLISH)
     
-    ax.grid(True, linestyle='--', alpha=0.7, axis='y')
+    style_y_grid(ax)
     plt.tight_layout()
     
     if output_path:
@@ -439,16 +507,18 @@ def plot_metric_only(all_data, labels, metric='f1', output_path=None, highlight_
     fig.patch.set_facecolor('#DDDDDD')
     ax.set_facecolor('#DDDDDD')
 
-    values = [m[key] for m in all_data]
-    x = np.arange(len(labels))
-    width = 0.5
+    display_labels = [simplify_display_label(label) for label in labels]
 
-    colors = assign_distinct_colors(labels)
-    if highlight_label and highlight_color and highlight_label in labels:
-        idx = labels.index(highlight_label)
+    values = [m[key] for m in all_data]
+    x = build_grouped_bar_positions(display_labels)
+    width = 0.78
+
+    colors = assign_distinct_colors(display_labels)
+    if highlight_label and highlight_color and highlight_label in display_labels:
+        idx = display_labels.index(highlight_label)
         colors[idx] = highlight_color
 
-    bars = ax.bar(x, values, width, color=colors, edgecolor='white', linewidth=1.5)
+    bars = ax.bar(x, values, width, color=colors, edgecolor='white', linewidth=1.5, zorder=2)
 
     for i, (bar, val) in enumerate(zip(bars, values)):
         height = bar.get_height()
@@ -463,7 +533,8 @@ def plot_metric_only(all_data, labels, metric='f1', output_path=None, highlight_
     ax.set_title(title, fontsize=22, fontweight='bold', fontname=FONT_ENGLISH)
     ax.set_ylabel(ylabel, fontsize=18, fontname=FONT_ENGLISH)
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=12, fontname=FONT_ENGLISH, rotation=15, ha='right')
+    ax.set_xticklabels(display_labels, fontsize=12, fontname=FONT_ENGLISH, rotation=15, ha='right')
+    ax.margins(x=0.05)
 
     max_val = max(values)
     ax.set_ylim(0, max_val + 12)
@@ -472,7 +543,7 @@ def plot_metric_only(all_data, labels, metric='f1', output_path=None, highlight_
         label.set_fontsize(16)
         label.set_fontname(FONT_ENGLISH)
 
-    ax.grid(True, linestyle='--', alpha=0.7, axis='y')
+    style_y_grid(ax)
     plt.tight_layout()
 
     if output_path:

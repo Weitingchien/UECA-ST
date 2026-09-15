@@ -1,0 +1,12 @@
+監督式訓練指令:
+    python UECA_CE_truncated_en.py --dataset enecpe_reccon_merged_train9_test1 --savecheckpoint True --save_path prompt_ECPE_enecpe_reccon_merged_train9_test1_UECA_CE_supervised_full_truncated_3_en/
+
+(監督式):
+    少量標註文檔的監督式訓練指令:
+        python UECA_CE_few_shot_ST_nest_en.py --dataset enecpe_reccon_merged_train1_val1_test1_unlabeled7/ --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 0 --savecheckpoint True --test_model_type initial --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01
+    測試集評估指令:
+        python UECA_CE_truncated_en.py   --dataset enecpe_reccon_merged_train9_test1   --test_only True   --checkpoint True   --checkpointpath ep_enecpe_reccon_merged_t9te1/prompt_ECPE_enecpe_reccon_merged_train9_test1_UECA_CE_supervised_full_truncated_2_en   --save_path ep_enecpe_reccon_merged_t9te1/prompt_ECPE_enecpe_reccon_merged_train9_test1_UECA_CE_supervised_full_truncated_2_en
+    平均三次結果指令:
+        for dir in ep_enecpe_reccon_merged_t9te1/prompt_ECPE_enecpe_reccon_merged_train9_test1_UECA_CE_supervised_full_truncated*_en; do
+            python run_evaluation_en.py --gt_dir enecpe_reccon_merged_train9_test1/ --pred_dir "$dir"
+        done

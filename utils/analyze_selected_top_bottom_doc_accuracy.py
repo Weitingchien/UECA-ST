@@ -8,8 +8,13 @@ from __future__ import annotations
 import argparse
 # 匯入 JSON 讀寫模組
 import json
+import re
 # 匯入路徑處理工具
 from pathlib import Path
+
+
+SUMMARY_EXPERIMENT_PATTERN = re.compile(r"^\s*-\s*(prompt_ECPE_few_shot_ST_[^\s]+)\s*$")
+SEED_PATTERN = re.compile(r"seed(\d+)")
 
 
 # 定義命令列參數解析函式
@@ -17,7 +22,13 @@ def parse_args() -> argparse.Namespace:
     # 建立參數解析器並設定說明文字
     parser = argparse.ArgumentParser(description="統計 selected=True 前/後N筆文檔準確率（依機率或散度排序）")
     # 加入實驗目錄參數 (可傳 prompt 目錄或 pseudo_results 目錄)
-    parser.add_argument("--experiment-dir", required=True, help="實驗資料夾或 pseudo_results_* 資料夾")
+    parser.add_argument("--experiment-dir", required=True, help="實驗資料夾、pseudo_results_* 資料夾，或 multi-seed summary.txt")
+    parser.add_argument(
+        "--experiments-root",
+        action="append",
+        default=[],
+        help="summary.txt 模式下的實驗根目錄；可重複指定多個，會依指定順序搜尋",
+    )
     # 加入 fold 參數（若不提供則走 fold-start~fold-end）
     parser.add_argument("--fold", type=int, default=None, help="fold 編號，例如 1")
     # 加入 round 參數（若不提供則走 round-start~round-end）
@@ -35,6 +46,11 @@ def parse_args() -> argparse.Namespace:
     # 加入輸出檔名參數，未提供時自動命名
     parser.add_argument("--output", default=None, help="輸出報告檔名（放在 pseudo_results_* 內）")
     # 回傳解析後參數
+    parser.add_argument(
+        "--skip-missing-rounds",
+        action="store_true",
+        help="Skip fold/round units whose divergence or pseudo file is missing",
+    )
     return parser.parse_args()
 
 
@@ -52,6 +68,76 @@ def resolve_pseudo_dir(experiment_dir: Path) -> Path:
         raise FileNotFoundError(f"找不到 pseudo_results_* 目錄: {experiment_dir}")
     # 回傳排序後最後一個（通常為最新結果）
     return candidates[-1]
+
+
+def extract_experiment_names(summary_path: Path) -> list[str]:
+    """從 multi-seed summary.txt 解析出各 seed 的實驗資料夾名稱。"""
+
+    experiment_names: list[str] = []
+    for line in summary_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        match = SUMMARY_EXPERIMENT_PATTERN.match(line)
+        if match:
+            experiment_names.append(match.group(1))
+
+    if not experiment_names:
+        raise ValueError(f"summary 中找不到實驗資料夾: {summary_path}")
+
+    return experiment_names
+
+
+def extract_seed(experiment_name: str) -> str:
+    """從實驗資料夾名稱抽出 seed 名稱，例如 seed20。"""
+
+    match = SEED_PATTERN.search(experiment_name)
+    if match is None:
+        raise ValueError(f"無法從實驗資料夾名稱解析 seed: {experiment_name}")
+    return f"seed{match.group(1)}"
+
+
+def seed_sort_key(seed_name: str) -> tuple[int, str]:
+    """讓 seed20、seed42、seed60 依數字排序。"""
+
+    match = SEED_PATTERN.search(seed_name)
+    if match:
+        return (int(match.group(1)), seed_name)
+    return (10**9, seed_name)
+
+
+def resolve_summary_sources(summary_path: Path, experiments_roots: list[Path] | None = None) -> list[dict]:
+    """把 multi-seed summary.txt 解析成可分析的 seed/pseudo_dir 清單。"""
+
+    candidate_roots = []
+    if experiments_roots is not None:
+        candidate_roots.extend(experiments_roots)
+    candidate_roots.append(summary_path.parent)
+    if summary_path.parent.name.startswith("results_"):
+        candidate_roots.append(summary_path.parent.parent / summary_path.parent.name[len("results_") :])
+    sources = []
+    seen_seeds = set()
+
+    for experiment_name in extract_experiment_names(summary_path):
+        seed_name = extract_seed(experiment_name)
+        if seed_name in seen_seeds:
+            raise ValueError(f"summary 中出現重複 seed: {seed_name}")
+        seen_seeds.add(seed_name)
+
+        experiment_dir = next(
+            (root / experiment_name for root in candidate_roots if (root / experiment_name).is_dir()),
+            None,
+        )
+        if experiment_dir is None:
+            tried = ", ".join(str(root / experiment_name) for root in candidate_roots)
+            raise FileNotFoundError(f"找不到 summary 指向的實驗資料夾，已嘗試: {tried}")
+
+        sources.append(
+            {
+                "seed": seed_name,
+                "experiment_dir": experiment_dir,
+                "pseudo_dir": resolve_pseudo_dir(experiment_dir),
+            }
+        )
+
+    return sorted(sources, key=lambda source: seed_sort_key(source["seed"]))
 
 
 # 定義依參數決定排序方式的函式
@@ -267,10 +353,203 @@ def write_one_report(result: dict, pseudo_dir: Path, sort_by: str, output_name: 
     return output_path
 
 
+def output_prefix_from_summary(summary_path: Path) -> str:
+    """依 summary 檔名產生輸出檔前綴。"""
+
+    name = summary_path.name
+    if name.endswith("_summary.txt"):
+        return name[: -len("_summary.txt")]
+    return summary_path.stem
+
+
+def pooled_stats(results: list[dict], stats_key: str) -> dict:
+    """合併多個 fold/seed 單位的分子分母後計算 pooled rate。"""
+
+    docs = sum(res[stats_key]["docs"] for res in results)
+    full_match_docs = sum(res[stats_key]["full_match_docs"] for res in results)
+    total_correct_tokens = sum(res[stats_key]["total_correct_tokens"] for res in results)
+    total_tokens = sum(res[stats_key]["total_tokens"] for res in results)
+    weighted_prob_sum = sum(res[stats_key]["avg_prob"] * res[stats_key]["docs"] for res in results)
+    weighted_div_sum = sum(res[stats_key]["avg_div"] * res[stats_key]["docs"] for res in results)
+
+    return {
+        "docs": docs,
+        "full_match_docs": full_match_docs,
+        "full_match_rate": (full_match_docs / docs * 100.0) if docs else 0.0,
+        "token_micro_acc": (total_correct_tokens / total_tokens * 100.0) if total_tokens else 0.0,
+        "total_correct_tokens": total_correct_tokens,
+        "total_tokens": total_tokens,
+        "avg_prob": (weighted_prob_sum / docs) if docs else 0.0,
+        "avg_div": (weighted_div_sum / docs) if docs else 0.0,
+    }
+
+
+def mean_rate(results: list[dict], stats_key: str) -> float:
+    """計算多個 fold/seed 單位 rate 的算術平均。"""
+
+    if not results:
+        return 0.0
+    return sum(res[stats_key]["full_match_rate"] for res in results) / len(results)
+
+
+def write_results_summary(
+    all_results: list[dict],
+    output_path: Path,
+    sort_by: str,
+    top_k: int,
+    folds: list[int],
+    rounds: list[int],
+    include_seed: bool,
+    summary_input: Path | None = None,
+) -> Path:
+    """輸出單一實驗或 multi-seed 的 top/bottom 彙整表。"""
+
+    lines = []
+    lines.append("=" * 130)
+    lines.append("selected=True top/bottom document accuracy summary")
+    lines.append("=" * 130)
+    if summary_input is not None:
+        lines.append(f"summary_file: {summary_input}")
+    lines.append(f"sort_by: {sort_by}")
+    lines.append(f"top_k: {top_k}")
+    lines.append(f"folds: {folds[0]}-{folds[-1]}")
+    lines.append(f"rounds: {rounds[0]}-{rounds[-1]}")
+    lines.append("")
+
+    if include_seed:
+        lines.append(
+            "seed\tfold\tround\tk\tselected_total\tTOP_full_docs\tTOP_full_rate\t"
+            "BOTTOM_full_docs\tBOTTOM_full_rate\tDIFF_docs"
+        )
+    else:
+        lines.append(
+            "fold\tround\tk\tselected_total\tTOP_full_docs\tTOP_full_rate\t"
+            "BOTTOM_full_docs\tBOTTOM_full_rate\tDIFF_docs"
+        )
+
+    for res in all_results:
+        top = res["top_stats"]
+        bottom = res["bottom_stats"]
+        diff_docs = top["full_match_docs"] - bottom["full_match_docs"]
+        prefix = f"{res['seed']}\t" if include_seed else ""
+        lines.append(
+            f"{prefix}{res['fold']}\t{res['round']}\t{res['k']}\t{res['selected_with_gt_total']}\t"
+            f"{top['full_match_docs']}\t{top['full_match_rate']:.2f}%\t"
+            f"{bottom['full_match_docs']}\t{bottom['full_match_rate']:.2f}%\t{diff_docs}"
+        )
+
+    lines.append("")
+    lines.append("[Round pooled summary]")
+    lines.append(
+        "round\tunits\tTOP_full_docs\tTOP_docs\tTOP_full_rate\tBOTTOM_full_docs\t"
+        "BOTTOM_docs\tBOTTOM_full_rate\tDIFF_docs"
+    )
+    for round_idx in rounds:
+        round_results = [res for res in all_results if res["round"] == round_idx]
+        top = pooled_stats(round_results, "top_stats")
+        bottom = pooled_stats(round_results, "bottom_stats")
+        diff_docs = top["full_match_docs"] - bottom["full_match_docs"]
+        lines.append(
+            f"{round_idx}\t{len(round_results)}\t"
+            f"{top['full_match_docs']}\t{top['docs']}\t{top['full_match_rate']:.2f}%\t"
+            f"{bottom['full_match_docs']}\t{bottom['docs']}\t{bottom['full_match_rate']:.2f}%\t{diff_docs}"
+        )
+
+    lines.append("")
+    lines.append("[Round mean summary]")
+    lines.append("round\tunits\tTOP_mean_full_rate\tBOTTOM_mean_full_rate\tDIFF_pp")
+    for round_idx in rounds:
+        round_results = [res for res in all_results if res["round"] == round_idx]
+        top_mean = mean_rate(round_results, "top_stats")
+        bottom_mean = mean_rate(round_results, "bottom_stats")
+        lines.append(
+            f"{round_idx}\t{len(round_results)}\t{top_mean:.2f}%\t{bottom_mean:.2f}%\t"
+            f"{top_mean - bottom_mean:.2f}"
+        )
+
+    lines.append("=" * 130)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+    return output_path
+
+
 # 定義主程式函式
 def main() -> None:
     # 解析命令列參數
     args = parse_args()
+    input_path = Path(args.experiment_dir)
+
+    if input_path.is_file():
+        if args.fold is not None:
+            folds = [args.fold]
+        else:
+            if args.fold_start > args.fold_end:
+                raise ValueError("--fold-start cannot be greater than --fold-end")
+            folds = list(range(args.fold_start, args.fold_end + 1))
+
+        if args.round is not None:
+            rounds = [args.round]
+        else:
+            if args.round_start > args.round_end:
+                raise ValueError("--round-start cannot be greater than --round-end")
+            rounds = list(range(args.round_start, args.round_end + 1))
+
+        experiments_roots = [Path(root) for root in args.experiments_root]
+        sources = resolve_summary_sources(input_path, experiments_roots=experiments_roots)
+        all_results: list[dict] = []
+
+        for source in sources:
+            pseudo_dir = source["pseudo_dir"]
+            for fold in folds:
+                for round_idx in rounds:
+                    try:
+                        result = analyze_one(
+                            pseudo_dir=pseudo_dir,
+                            fold=fold,
+                            round_idx=round_idx,
+                            top_k=args.top_k,
+                            sort_by=args.sort_by,
+                        )
+                    except FileNotFoundError as exc:
+                        if not args.skip_missing_rounds:
+                            raise
+                        print(f"skip missing: seed={source['seed']} fold={fold} round={round_idx}: {exc}")
+                        continue
+                    result["seed"] = source["seed"]
+                    result["experiment_dir"] = str(source["experiment_dir"])
+                    all_results.append(result)
+
+                    one_path = write_one_report(
+                        result=result,
+                        pseudo_dir=pseudo_dir,
+                        sort_by=args.sort_by,
+                    )
+                    print(f"report: {one_path}")
+
+        if len(all_results) > 1:
+            summary_name = args.output or (
+                f"{output_prefix_from_summary(input_path)}_selected_true_top_bottom_doc_accuracy_"
+                f"top{args.top_k}_{args.sort_by}_f{folds[0]}-{folds[-1]}_r{rounds[0]}-{rounds[-1]}.txt"
+            )
+            summary_path = Path(summary_name)
+            if not summary_path.is_absolute():
+                summary_path = input_path.parent / summary_path
+
+            summary_path = write_results_summary(
+                all_results=all_results,
+                output_path=summary_path,
+                sort_by=args.sort_by,
+                top_k=args.top_k,
+                folds=folds,
+                rounds=rounds,
+                include_seed=True,
+                summary_input=input_path,
+            )
+            print(f"summary: {summary_path}")
+
+        print("[done] selected=True top/bottom multi-seed statistics")
+        return
+
     # 轉成 Path 物件
     experiment_dir = Path(args.experiment_dir)
     # 解析出真正的 pseudo_results 目錄
@@ -298,13 +577,19 @@ def main() -> None:
     # 逐一分析每個 fold/round 組合
     for fold in folds:
         for round_idx in rounds:
-            result = analyze_one(
-                pseudo_dir=pseudo_dir,
-                fold=fold,
-                round_idx=round_idx,
-                top_k=args.top_k,
-                sort_by=args.sort_by,
-            )
+            try:
+                result = analyze_one(
+                    pseudo_dir=pseudo_dir,
+                    fold=fold,
+                    round_idx=round_idx,
+                    top_k=args.top_k,
+                    sort_by=args.sort_by,
+                )
+            except FileNotFoundError as exc:
+                if not args.skip_missing_rounds:
+                    raise
+                print(f"skip missing: fold={fold} round={round_idx}: {exc}")
+                continue
             all_results.append(result)
 
             # 單一組合時沿用 --output 檔名；多組合時固定每組一檔

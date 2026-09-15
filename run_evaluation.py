@@ -88,9 +88,29 @@ def main():
     python run_evaluation.py --gt_dir split10_home_train1_test1_val1_unlabeled7_disjoint/ --pred_dir prompt_ECPE_few_shot_ST_2025_11_27.../
     
 這個腳本會自動執行:
-    1. python eval_UECA_CE_v2.py 或 eval_UECA_EC_v2.py --gt_dir ... --pred_dir ... (根據資料夾名稱自動判斷)
-    2. python calculate_fold_averages.py --file .../test_results.txt --output average_results.txt --output_dir ... --std
-    3. python utils/aggregate_eval_counts.py --input .../test_results.txt --output .../counts_summary_detailed.txt
+     1. python eval_UECA_CE_v2.py 或 eval_UECA_EC_v2.py --gt_dir ... --pred_dir ...
+         用途:
+         - 逐一讀取 gt_dir/fold1_test.json ~ fold10_test.json 與 pred_dir/fold1_text_result.txt ~ fold10_text_result.txt
+         - 先把 Ground Truth JSON 轉成和預測檔相同的逐行文字格式，方便做一一對齊比對
+         - 對每個 fold 計算 Emotion / Cause / Pair(m1,m2,m3) 的 Precision、Recall、F1
+         - 最後把所有 fold 的詳細結果合併寫入 pred_dir/test_results.txt
+         你可以把這一步理解成:「先產生每一折最原始、最完整的評估明細」
+
+     2. python calculate_fold_averages.py --file .../test_results.txt --output average_results.txt --output_dir ... --std
+         用途:
+         - 讀取 Step 1 產生的 test_results.txt
+         - 解析其中每個 fold 的 Emotion / Cause / Pair(m1,m2,m3) 指標表格
+         - 計算 10 折的平均值，以及加上 --std 時的標準差
+         - 輸出 pred_dir/average_results.txt，方便快速看整體平均表現
+         你可以把這一步理解成:「把每一折結果濃縮成平均摘要報告」
+
+     3. python utils/aggregate_eval_counts.py --input .../test_results.txt --output .../counts_summary_detailed.txt
+         用途:
+         - 同樣讀取 Step 1 的 test_results.txt，但這次不是看百分比，而是回頭統計原始計數
+         - 彙整每個指標在 10 折中的 Total TP、Total Pred、Total GT
+         - 再用這些總計數計算 micro-averaged Precision / Recall / F1，並附上各折計數細節與標準差
+         - 輸出 pred_dir/counts_summary_detailed.txt，適合檢查模型到底是預測太多、太少，還是 recall 不足
+         你可以把這一步理解成:「從原始命中數量角度重新看 10 折整體表現」
         """
     )
     parser.add_argument('--gt_dir', type=str, required=True,

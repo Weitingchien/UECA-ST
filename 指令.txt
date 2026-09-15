@@ -1,4 +1,10 @@
 資料集切分:
+    python utils/generate_aligned_disjoint_splits_from_split10.py --input-dir split10 --source-fold 1 (跨折不重複與同折不重複，產生split10_full_2019原始資料集、split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019、split10_train9_test1_aligned_disjoint_2019資料集)
+    python utils/generate_aligned_disjoint_splits_from_split10.py --input-dir split10_enecpe_reccon_merged --source-fold 1 --reconstructed-dir enecpe_reccon_merged_full --supervised-output-dir enecpe_reccon_merged_train9_test1 --self-training-output-dir enecpe_reccon_merged_train1_val1_test1_unlabeled7
+    
+    (2024 資料集):
+    python utils/generate_carel_zh5_aligned_disjoint_splits.py
+
     split10_disjoint_fewshot(split10 -> split10_disjoint_fewshot):
     python utils/generate_disjoint_splits_from_json.py --input-dir split10 --output-dir split10_disjoint_fewshot/ --train_ratio 0.1 --val_ratio 0.1 --unlabeled_ratio 0.8 --n_splits 10 --seed 42 
     
@@ -12,10 +18,32 @@
 
 組合數量的文本統計(split10):
     python utils/analyze_pair_distribution.py --files split10/fold1_train.json split10/fold1_test.json --split-multi-emotion --deduplicate
-    only_one_pair: 1759 (90.44%)
-    exactly_two_pairs: 164 (8.43%)
-    three_or_more_pairs: 22 (1.13%)
-    total: 1945 (100.00%)
+     only_one_pair: 1759 (90.44%)
+     exactly_two_pairs: 164 (8.43%)
+     three_or_more_pairs: 22 (1.13%)
+     total: 1945 (100.00%)
+
+    EN-ECPE資料集:
+        python utils/analyze_pair_distribution.py --files split10_enecpe/fold1_train.json split10_enecpe/fold1_test.json --split-multi-emotion --deduplicate
+            only_one_pair: 1196 (88.33%)
+            exactly_two_pairs: 135 (9.97%)
+            three_or_more_pairs: 23 (1.70%)
+            total: 1354 (100.00%)
+
+    RECCON資料集:
+        python utils/analyze_pair_distribution.py --files split10_reccon/fold1_train.json split10_reccon/fold1_test.json --split-multi-emotion --deduplicate
+            only_one_pair: 9 (0.81%)
+            exactly_two_pairs: 19 (1.72%)
+            three_or_more_pairs: 1078 (97.47%)
+            total: 1106 (100.00%)
+    
+    EN-ECPE資料集與RECCON資料集合併:
+        python utils/analyze_pair_distribution.py --files split10_enecpe_reccon_merged/fold1_train.json split10_enecpe_reccon_merged/fold1_test.json --split-multi-emotion --deduplicate
+            only_one_pair: 1205 (48.98%)
+            exactly_two_pairs: 154 (6.26%)
+            three_or_more_pairs: 1101 (44.76%)
+            total: 2460 (100.00%)
+
 
 組合數量的文本統計(home、society、education、entertainment、finance):
     for dir in split10_home_train9_test1 \
@@ -96,7 +124,19 @@
     total: 186 (100.00%)
     single_pair_or_duplicates: 1765
 
+    python utils/count_pair_relationships.py --files split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/fold*_train.json split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/fold*_test.json
+    same_emotion_diff_cause: 58 (31.18%)
+    diff_emotion_same_cause: 5 (2.69%)
+    diff_emotion_diff_cause: 123 (66.13%)
+    total: 186 (100.00%)
+    single_pair_or_duplicates: 1765
 
+    python utils/count_pair_relationships.py --files split10_enecpe_reccon_merged/fold*_train.json split10_enecpe_reccon_merged/fold*_test.json
+    same_emotion_diff_cause: 1066 (49.51%)
+    diff_emotion_same_cause: 981 (45.56%)
+    diff_emotion_diff_cause: 106 (4.92%)
+    total: 2153 (100.00%)
+    single_pair_or_duplicates: 1205
 
 
 少樣本資料集(home):
@@ -184,6 +224,15 @@
         python UECA_CE_truncated.py --dataset split10 --savecheckpoint True --save_path prompt_2013_2015_ECPE_split10_UECA_CE_supervised_full_truncated/
         python UECA_CE_truncated.py --dataset split10 --savecheckpoint True --save_path prompt_2013_2015_ECPE_split10_UECA_CE_supervised_full_truncated_2/
         python UECA_CE_truncated.py --dataset split10 --savecheckpoint True --save_path prompt_2013_2015_ECPE_split10_UECA_CE_supervised_full_truncated_3/
+        (enecpe_reccon_merged_train9_test1):
+            python UECA_CE_truncated_en.py --dataset enecpe_reccon_merged_train9_test1 --savecheckpoint True --save_path prompt_ECPE_enecpe_reccon_merged_train9_test1_UECA_CE_supervised_full_truncated_en/
+            python UECA_CE_truncated_en.py --dataset enecpe_reccon_merged_train9_test1 --savecheckpoint True --save_path prompt_ECPE_enecpe_reccon_merged_train9_test1_UECA_CE_supervised_full_truncated_2_en/
+            python UECA_CE_truncated_en.py --dataset enecpe_reccon_merged_train9_test1 --savecheckpoint True --save_path prompt_ECPE_enecpe_reccon_merged_train9_test1_UECA_CE_supervised_full_truncated_3_en/
+
+        (split10_train9_test1_aligned_disjoint_2019)
+        python UECA_CE_truncated.py --dataset split10_train9_test1_aligned_disjoint_2019 --savecheckpoint True --save_path prompt_2013_2015_ECPE_split10_aligned_disjoint_2019_UECA_CE_supervised_full_truncated/
+        python UECA_CE_truncated.py --dataset split10_train9_test1_aligned_disjoint_2019 --savecheckpoint True --save_path prompt_2013_2015_ECPE_split10_aligned_disjoint_2019_UECA_CE_supervised_full_truncated_2/
+        python UECA_CE_truncated.py --dataset split10_train9_test1_aligned_disjoint_2019 --savecheckpoint True --save_path prompt_2013_2015_ECPE_split10_aligned_disjoint_2019_UECA_CE_supervised_full_truncated_3/
 
 
     訓練集10%、測試集10%、驗證集10%、未標籤資料集70%:
@@ -303,6 +352,11 @@
     python UECA_CE_few_shot_ST_nest.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 0 --savecheckpoint True --test_model_type initial --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01
     python UECA_EC_few_shot_ST_nest.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 0 --savecheckpoint True --test_model_type initial --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01
 
+    (split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019的few-shot實驗):
+    python UECA_CE_few_shot_ST_nest.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 0 --savecheckpoint True --test_model_type initial --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01
+
+
+
     ( split10_train1_test1_val1_unlabeled7_disjoint的few-shot + self-training實驗 --retain_pseudo_in_unlabeled --threshold 0.9 --self_training_rounds 10 --mask_threshold_mode emotion ):
     python UECA_CE_few_shot_ST_nest.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector threshold --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 10 --st_training_epochs 3 --savecheckpoint True --test_model_type self_training --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --retain_pseudo_in_unlabeled --threshold 0.7 --gamma 0.5 --log_pseudo_quality --nest_loss_mode standard --mask_threshold_mode emotion
     python UECA_CE_few_shot_ST_nest.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector threshold --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 10 --st_training_epochs 3 --savecheckpoint True --test_model_type self_training --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --retain_pseudo_in_unlabeled --threshold 0.75 --gamma 0.5 --log_pseudo_quality --nest_loss_mode standard --mask_threshold_mode emotion
@@ -316,6 +370,27 @@
     python UECA_CE_few_shot_ST_nest.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector threshold --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 10 --st_training_epochs 3 --savecheckpoint True --test_model_type self_training --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --retain_pseudo_in_unlabeled --threshold 0.9 --gamma 0.5 --log_pseudo_quality --nest_loss_mode standard --mask_threshold_mode all
     python UECA_CE_few_shot_ST_nest_hybrid.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector threshold --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 10 --st_training_epochs 3 --savecheckpoint True --test_model_type self_training --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --retain_pseudo_in_unlabeled --threshold 0.9 --gamma 0.5 --log_pseudo_quality --nest_loss_mode standard --mask_threshold_mode all
     python UECA_CE_few_shot_ST_nest_hybrid.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector threshold --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 10 --st_training_epochs 3 --savecheckpoint True --test_model_type self_training --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --retain_pseudo_in_unlabeled --threshold 0.7 --gamma 0.5 --log_pseudo_quality --nest_loss_mode standard --mask_threshold_mode all
+    (split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019):
+        (emotion --pseudo_selector threshold):
+            python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector threshold --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --threshold 0.9 --gamma 0.5 --log_pseudo_quality --nest_loss_mode standard --mask_threshold_mode emotion --self_training_main_metric emotion --initial_supervised_metric emotion --test_metric emotion --save_task_specific_checkpoints
+        (emotion --pseudo_selector threshold, best f1 model: pair):
+            python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector threshold --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --threshold 0.9 --gamma 0.5 --log_pseudo_quality --nest_loss_mode standard --mask_threshold_mode emotion --self_training_main_metric pair --initial_supervised_metric pair --test_metric pair --save_task_specific_checkpoints
+        '(emotion --pseudo_selector threshold, best f1 model: pair threshold 0.7): '   
+            python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector threshold --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --threshold 0.7 --gamma 0.5 --log_pseudo_quality --nest_loss_mode standard --mask_threshold_mode emotion --self_training_main_metric pair --initial_supervised_metric pair --test_metric pair --save_task_specific_checkpoints
+        (cause --pseudo_selector threshold):
+            python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector threshold --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --seed 60 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --threshold 0.9 --gamma 0.5 --log_pseudo_quality --nest_loss_mode standard --mask_threshold_mode cause --self_training_main_metric cause --initial_supervised_metric cause --test_metric cause --save_task_specific_checkpoints
+        (cause --pseudo_selector threshold, best f1 model: pair):    
+            python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector threshold --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --seed 60 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --threshold 0.9 --gamma 0.5 --log_pseudo_quality --nest_loss_mode standard --mask_threshold_mode cause --self_training_main_metric pair --initial_supervised_metric pair --test_metric pair --save_task_specific_checkpoints
+        (cause --pseudo_selector threshold, best f1 model: pair threshold 0.7): 
+            python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector threshold --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --seed 60 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --threshold 0.7 --gamma 0.5 --log_pseudo_quality --nest_loss_mode standard --mask_threshold_mode cause --self_training_main_metric pair --initial_supervised_metric pair --test_metric pair --save_task_specific_checkpoints
+
+        (all --pseudo_selector threshold):
+            python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector threshold --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --seed 60 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --threshold 0.9 --gamma 0.5 --log_pseudo_quality --nest_loss_mode standard --mask_threshold_mode all --self_training_main_metric pair --initial_supervised_metric pair --test_metric pair --save_task_specific_checkpoints
+        (all --pseudo_selector threshold, best f1 model: pair):
+            python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector threshold --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --seed 60 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --threshold 0.9 --gamma 0.5 --log_pseudo_quality --nest_loss_mode standard --mask_threshold_mode all --self_training_main_metric pair --initial_supervised_metric pair --test_metric pair --save_task_specific_checkpoints
+        (all --pseudo_selector threshold, best f1 model: pair threshold 0.7):
+            python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector threshold --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --threshold 0.7 --gamma 0.5 --log_pseudo_quality --nest_loss_mode standard --mask_threshold_mode all --self_training_main_metric pair --initial_supervised_metric pair --test_metric pair --save_task_specific_checkpoints
+
 
     python UECA_CE_few_shot_ST_nest.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 10 --st_training_epochs 3 --savecheckpoint True --test_model_type self_training --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --retain_pseudo_in_unlabeled --gamma 0.5 --log_pseudo_quality --nest_loss_mode standard --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 7.0 --nest_divergence_mode cause_clause --knn_embedding_mode cause_clause_mask
     python UECA_CE_few_shot_ST_nest.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 10 --st_training_epochs 3 --savecheckpoint True --test_model_type self_training --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --retain_pseudo_in_unlabeled --gamma 0.5 --log_pseudo_quality --nest_loss_mode standard --nest_k 7 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 7.0 --nest_divergence_mode cause_clause --knn_embedding_mode cause_clause_mask
@@ -382,6 +457,114 @@
         python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_loss_threshold 0.9 --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode cause_clause --knn_embedding_mode cause_clause_mask --consistency_pseudo --consistency_rule all_equal --consistency_all_equal_round0_only --consistency_model_source self_training_best
         (多任務，情緒F1最佳模型、原因F1最佳模型、情緒原因F1最佳模型進行3個模型的權重平均，取得平均後的模型再作測試集評估，提高泛化能力，避免過度擬合於驗證集)
         python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training_avg3 --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.5 --nest_divergence_mode cause_clause --knn_embedding_mode cause_clause_mask --save_val_predictions --save_task_specific_checkpoints
+        (v2版的純NeST模式，載入最佳pair模型，散度以及歐幾里得距離採用emotion模型):
+            python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode emotion_clause --knn_embedding_mode emotion_clause --save_val_predictions
+            
+            (監督式訓練、自訓練、最終測試模型，載入最佳emotion模型):
+                python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --initial_supervised_metric emotion --self_training_main_metric emotion --test_metric emotion --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode emotion_clause --knn_embedding_mode emotion_clause --save_val_predictions
+                python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --initial_supervised_metric pair --self_training_main_metric pair --test_metric pair --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode emotion_clause --knn_embedding_mode emotion_clause --save_val_predictions
+            (UECA_CE_few_shot_ST_nest_consistency_somc_v2_en.py): 
+                python UECA_CE_few_shot_ST_nest_consistency_somc_v2_en.py --dataset enecpe_reccon_merged_train1_val1_test1_unlabeled7/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode emotion_clause --knn_embedding_mode emotion_clause --save_val_predictions
+
+            (監督式訓練、自訓練、最終測試模型，載入最佳cause模型):
+                python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --initial_supervised_metric cause --self_training_main_metric cause --test_metric cause --seed 60 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode cause_clause --knn_embedding_mode cause_clause --save_val_predictions
+            
+            (監督式訓練、自訓練、最終測試模型，載入最佳pair模型):
+                python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --initial_supervised_metric cause --self_training_main_metric cause --test_metric cause --seed 60 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode cause_clause --knn_embedding_mode cause_clause --save_val_predictions
+            
+            (監督式訓練、自訓練、最終測試模型，載入最佳pair模型、split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019資料集):
+                python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --initial_supervised_metric pair --self_training_main_metric pair --test_metric pair --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode emotion_clause --knn_embedding_mode emotion_clause --save_val_predictions
+        
+        (v2版的子任務平均模式):
+            (監督式訓練、自訓練、最終測試模型，載入最佳pair模型):
+                python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training_avg3 --initial_supervised_metric pair --self_training_main_metric pair --test_metric pair --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode emotion_clause --knn_embedding_mode emotion_clause --save_val_predictions --save_task_specific_checkpoints
+            
+            (監督式訓練、自訓練、最終測試模型，載入最佳emotion模型):
+                python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training_avg3 --initial_supervised_metric emotion --self_training_main_metric emotion --test_metric emotion --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode emotion_clause --knn_embedding_mode emotion_clause --save_val_predictions
+
+
+            python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training_avg3 --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode cause_clause --knn_embedding_mode cause_clause --save_val_predictions --save_task_specific_checkpoints
+            python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training_avg3 --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode cause_clause --knn_embedding_mode cause_clause --save_val_predictions --save_task_specific_checkpoints
+            (UECA_CE_few_shot_ST_nest_consistency_somc_v4.py):
+                python UECA_CE_few_shot_ST_nest_consistency_somc_v4.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training_avg3_iterative --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode emotion_clause --knn_embedding_mode emotion_clause --save_val_predictions --save_task_specific_checkpoints
+            (emotion):
+                python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training_avg3 --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode emotion_clause --knn_embedding_mode emotion_clause --save_val_predictions --save_task_specific_checkpoints
+                python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training_avg3 --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode emotion_clause --knn_embedding_mode emotion_clause --save_val_predictions --save_task_specific_checkpoints
+            (UECA_CE_few_shot_ST_nest_consistency_somc_v2_en.py):
+                python UECA_CE_few_shot_ST_nest_consistency_somc_v2_en.py --dataset enecpe_reccon_merged_train1_val1_test1_unlabeled7/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training_avg3 --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode emotion_clause --knn_embedding_mode emotion_clause --save_val_predictions --save_task_specific_checkpoints
+            (cause):
+                python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training_avg3 --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 3 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode cause_clause --knn_embedding_mode cause_clause --save_val_predictions --save_task_specific_checkpoints
+            (UECA_CE_few_shot_ST_nest_consistency_somc_v2_en.py):
+                python UECA_CE_few_shot_ST_nest_consistency_somc_v2_en.py --dataset enecpe_reccon_merged_train1_val1_test1_unlabeled7/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training_avg3 --seed 60 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode cause_clause --knn_embedding_mode cause_clause --save_val_predictions --save_task_specific_checkpoints
+
+
+            (監督式訓練、自訓練、最終測試模型，載入最佳emotion模型):
+                python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --initial_supervised_metric emotion --self_training_main_metric emotion --test_metric emotion --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode emotion_clause --knn_embedding_mode emotion_clause --save_val_predictions
+                (split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019):
+                python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --initial_supervised_metric emotion --self_training_main_metric emotion --test_metric emotion --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode emotion_clause --knn_embedding_mode emotion_clause --save_val_predictions
+            (監督式訓練、自訓練、最終測試模型，載入最佳cause模型):
+                (split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019):
+                python UECA_CE_few_shot_ST_nest_consistency_somc_v2.py --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --initial_supervised_metric cause --self_training_main_metric cause --test_metric cause --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 1.0 --nest_divergence_mode cause_clause --knn_embedding_mode cause_clause --save_val_predictions
+        
+        (v3版的多任務 + 未標註資料集不刪除已選中的偽標籤樣本，如果跨輪再次選中則更新文檔的偽標籤，同一輪的偽標籤樣本不會重複被選，--nest_multiplier 3.0、--nest_k 5):
+            python UECA_CE_few_shot_ST_nest_consistency_somc_v3.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --retain_pseudo_in_unlabeled --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 3.0 --nest_divergence_mode cause_clause --knn_embedding_mode cause_clause_mask --save_val_predictions
+            python UECA_CE_few_shot_ST_nest_consistency_somc_v3.py --dataset split10_train1_test1_val1_unlabeled7_disjoint/ --pseudo_selector nest --start_fold 1 --end_fold 10 --training_iter 70 --self_training_rounds 5 --st_training_epochs 20 --savecheckpoint True --test_model_type self_training_avg3 --seed 42 --batch_size 8 --learning_rate 1e-5 --weight_decay 0.01 --retain_pseudo_in_unlabeled --gamma 0.5 --log_pseudo_quality --nest_loss_mode nest --nest_k 5 --nest_beta 0.1 --nest_m 0.6 --nest_multiplier 3.0 --nest_divergence_mode cause_clause --knn_embedding_mode cause_clause_mask --save_val_predictions --save_task_specific_checkpoints
+
+
+        (confidence篩選方式):
+        python UECA_CE_few_shot_ST_nest_confidence_v1.py \
+            --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ \
+            --pseudo_selector confidence \
+            --confidence_score_mode emotion_clause \
+            --confidence_multiplier 1.0 \
+            --start_fold 1 \
+            --end_fold 10 \
+            --training_iter 70 \
+            --self_training_rounds 5 \
+            --st_training_epochs 20 \
+            --savecheckpoint True \
+            --test_model_type self_training \
+            --initial_supervised_metric pair \
+            --self_training_main_metric pair \
+            --test_metric pair \
+            --seed 42 \
+            --batch_size 8 \
+            --learning_rate 1e-5 \
+            --weight_decay 0.01 \
+            --gamma 0.5 \
+            --log_pseudo_quality \
+            --nest_loss_mode nest \
+            --nest_loss_threshold 0.9 \
+            --save_val_predictions \
+            
+
+        (confidence篩選方式、自訓練結束進行多任務模型參數平均)
+        python UECA_CE_few_shot_ST_nest_confidence_v1.py \
+            --dataset split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ \
+            --pseudo_selector confidence \
+            --confidence_score_mode emotion_clause \
+            --confidence_multiplier 1.0 \
+            --start_fold 1 \
+            --end_fold 10 \
+            --training_iter 70 \
+            --self_training_rounds 5 \
+            --st_training_epochs 20 \
+            --savecheckpoint True \
+            --test_model_type self_training_avg3 \
+            --initial_supervised_metric pair \
+            --self_training_main_metric pair \
+            --seed 42 \
+            --batch_size 8 \
+            --learning_rate 1e-5 \
+            --weight_decay 0.01 \
+            --gamma 0.5 \
+            --log_pseudo_quality \
+            --nest_loss_mode nest \
+            --nest_loss_threshold 0.9 \
+            --save_val_predictions \
+            --save_task_specific_checkpoints
+
+
 
 
 
@@ -394,6 +577,13 @@
     python UECA_CE.py --test_only True --checkpoint True --checkpointpath prompt_2013_2015_ECPE_split10_UECA_CE_supervised_full_3/ --batch_size 8 --dataset split10/ --save_path prompt_2013_2015_ECPE_split10_UECA_CE_supervised_full_3/
     python UECA_CE.py --test_only True --checkpoint True --checkpointpath prompt_2013_2015_ECPE_split10_UECA_CE_supervised_full_truncated/ --batch_size 8 --dataset split10/ --save_path prompt_2013_2015_ECPE_split10_UECA_CE_supervised_full_truncated/
     python UECA_CE.py --test_only True --checkpoint True --checkpointpath prompt_2013_2015_ECPE_split10_UECA_CE_supervised_full_truncated_2/ --batch_size 8 --dataset split10/ --save_path prompt_2013_2015_ECPE_split10_UECA_CE_supervised_full_truncated_2/
+
+    python UECA_CE_truncated.py --test_only True --checkpoint True --checkpointpath ep_split10_t9te1_aligned_disjoint_2019/prompt_2013_2015_ECPE_split10_aligned_disjoint_2019_UECA_CE_supervised_full_truncated/ --batch_size 8 --dataset split10_train9_test1_aligned_disjoint_2019/ --save_path ep_split10_t9te1_aligned_disjoint_2019/prompt_2013_2015_ECPE_split10_aligned_disjoint_2019_UECA_CE_supervised_full_truncated/
+    python UECA_CE_truncated.py --test_only True --checkpoint True --checkpointpath ep_split10_t9te1_aligned_disjoint_2019/prompt_2013_2015_ECPE_split10_aligned_disjoint_2019_UECA_CE_supervised_full_truncated_2/ --batch_size 8 --dataset split10_train9_test1_aligned_disjoint_2019/ --save_path ep_split10_t9te1_aligned_disjoint_2019/prompt_2013_2015_ECPE_split10_aligned_disjoint_2019_UECA_CE_supervised_full_truncated_2/
+    python UECA_CE_truncated.py --test_only True --checkpoint True --checkpointpath ep_split10_t9te1_aligned_disjoint_2019/prompt_2013_2015_ECPE_split10_aligned_disjoint_2019_UECA_CE_supervised_full_truncated_3/ --batch_size 8 --dataset split10_train9_test1_aligned_disjoint_2019/ --save_path ep_split10_t9te1_aligned_disjoint_2019/prompt_2013_2015_ECPE_split10_aligned_disjoint_2019_UECA_CE_supervised_full_truncated_3/
+
+
+    
     python UECA_EC.py --test_only True --checkpoint True --checkpointpath prompt_2013_2015_ECPE_split10_UECA_EC_supervised_full/ --batch_size 8 --dataset split10/ --save_path prompt_2013_2015_ECPE_split10_UECA_EC_supervised_full/ 
 
     (資料集使用split10_few_shot):
@@ -1025,11 +1215,28 @@ python utils/statistical_test.py \
 對ep_split10_home_t1te1v1_u7_disjoint資料夾內的所有資料夾，執行run_evaluation.py
 for dir in ep_split10_home_t1te1v1_u7_disjoint/prompt_ECPE_few_shot_ST_*/; do python run_evaluation.py --gt_dir split10_home_train1_test1_val1_unlabeled7_disjoint/ --pred_dir "$dir"; done
 
+(split10_train9_test1_aligned_disjoint_2019): 
+for dir in ep_split10_t9te1_aligned_disjoint_2019/prompt_2013_2015_ECPE_split10_aligned_disjoint_2019_UECA_CE_supervised_full_truncated*/; do python run_evaluation.py --gt_dir split10_train9_test1_aligned_disjoint_2019/ --pred_dir "$dir"; done
 
-for dir in ep_split10_t1_te1_v1_u7_disjoint/prompt_ECPE_few_shot_ST_*/; do python run_evaluation.py --gt_dir split10_train1_test1_val1_unlabeled7_disjoint/ --pred_dir "$dir"; done
+(split10_train1_test1_val1_unlabeled7_disjoint_不使用路徑):
+for dir in ep_split10_t1te1v1_u7_disjoint/prompt_ECPE_few_shot_ST_*; do python run_evaluation.py --gt_dir split10_train1_test1_val1_unlabeled7_disjoint/ --pred_dir "$dir"; done
+
 
 
 for dir in ep_split10_t1te1v1_u7_disjoint/prompt_ECPE_few_shot_ST_*; do python run_evaluation.py --gt_dir split10_train1_test1_val1_unlabeled7_disjoint/ --pred_dir "$dir"; done
+
+
+for dir in ep_split10_t1v1te1_u7_aligned_disjoint_2019/prompt_ECPE_few_shot_ST_*; do python run_evaluation.py --gt_dir split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pred_dir "$dir"; done
+
+
+(split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019集路徑):
+for dir in ep_split10_t1v1te1_u7_aligned_disjoint_2019/prompt_ECPE_few_shot_ST_*; do python run_evaluation.py --gt_dir split10_train1_val1_test1_unlabeled7_aligned_disjoint_2019/ --pred_dir "$dir"; done
+
+
+
+for dir in ep_enecpe_reccon_merged_t1v1te1_u7/prompt_ECPE_few_shot_ST_*; do python run_evaluation.py --gt_dir enecpe_reccon_merged_train1_val1_test1_unlabeled7/ --pred_dir "$dir"; done
+
+
 
 
 
@@ -1391,6 +1598,18 @@ UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mas
 
 
 
+UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1p5_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_st5_ste20_remove_pseudo_v2_CE 10% train、10%val、10%test:
+    python utils/aggregate_multi_seed.py --dirs \
+    ep_split10_t1te1v1_u7_disjoint/prompt_ECPE_few_shot_ST_2026_05_08_06_49_12_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_seed42_remove_pseudo_v2_CE \
+    ep_split10_t1te1v1_u7_disjoint/prompt_ECPE_few_shot_ST_2026_05_08_06_49_22_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_seed20_remove_pseudo_v2_CE \
+    ep_split10_t1te1v1_u7_disjoint/prompt_ECPE_few_shot_ST_2026_05_08_07_44_19_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_seed60_remove_pseudo_v2_CE \
+    --output_dir results_ep_split10_t1te1v1_u7_disjoint \
+    --output UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_remove_pseudo_v2_CE_summary.txt
+
+
+
+
+
 
 
 
@@ -1633,7 +1852,7 @@ python utils/plot_unselected_correct_comparison.py \
 
 
     
-    safe_copy_F_to_H.bat:
+    cmd.exe /c "D:\GithubRepo\UECA_ST\safe_copy_F_to_H.bat":
         在 Choose folder 1 (1-2) : 輸入 1 或 2
         按 Enter
         接著它會再問 Choose folder 2...
@@ -1709,3 +1928,161 @@ python utils/visualize_tsne.py --experiment_dir "ep_split10_home_t1te1v1_u7_disj
 複製至外接硬碟的指令:
 (想把內容直接放在 experiments 下 (不保留原資料夾名稱) 在來源路徑結尾加 /)
 rsync -rlDvh --progress /mnt/d/GithubRepo/UECA_ST/ep_split10_home_t1te1v1_u7_disjoint /mnt/f/experiments/
+
+
+
+
+
+
+
+實驗圖指令:
+
+pair_m1_multi_seed_comparison_v10.png:
+
+    python utils/plot_aggregated_pair_m1.py \
+    --summary-files \
+        results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_st0_CE_summary.txt \
+        results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt \
+        results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_remove_pseudo_v2_CE_summary.txt \
+        results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1p5_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt \
+        results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1p5_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_remove_pseudo_v2_CE_summary.txt \
+    --labels \
+        "w/o ST" \
+        "NeST (mult=1, subtask3)" \
+        "NeST (mult=1)" \
+        "NeST (mult=1.5, subtask3)" \
+        "NeST (mult=1.5)" \
+    --experiments-roots \
+        ep_split10_t1te1v1_u7_disjoint \
+        /mnt/f/experiments/ep_split10_t1te1v1_u7_disjoint \
+    --f1_only \
+    --output pair_m1_multi_seed_comparison_v10.png
+
+
+
+python utils/plot_aggregated_pair_m1.py \
+    --summary-files \
+        results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt \
+        results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_remove_pseudo_v2_CE_summary.txt \
+        results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1p5_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt \
+        results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1p5_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_remove_pseudo_v2_CE_summary.txt \
+    --labels \
+        "(mult=1, subtask3)" \
+        "(mult=1)" \
+        "(mult=1.5, subtask3)" \
+        "(mult=1.5)" \
+    --experiments-roots \
+        /mnt/d/GithubRepo/UECA_ST/ep_split10_t1te1v1_u7_disjoint \
+        /mnt/f/experiments/ep_split10_t1te1v1_u7_disjoint \
+        /mnt/h/ep_split10_t1te1v1_u7_disjoint \
+    --f1_only \
+    --output pair_m1_multi_seed_comparison_v13.png
+
+
+
+
+
+
+
+
+
+(Document Correact Rate):
+    python utils/compare_unfiltered_mask3_correct_CE.py   --summary-baseline     results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_st0_CE_summary.txt     results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt     results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_remove_pseudo_v2_CE_summary.txt     results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1p5_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt     results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1p5_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_remove_pseudo_v2_CE_summary.txt   --experiments-roots     ep_split10_t1te1v1_u7_disjoint     /mnt/f/experiments/ep_split10_t1te1v1_u7_disjoint   --dataset-dir split10_train1_test1_val1_unlabeled7_disjoint   --tokenizer bert-base-chinese   --batch-size 8   --fold-start 1   --fold-end 10   --device cuda   --save-all-correct-cache
+
+(驗證集的Precision、Recall):
+    python utils/plot_val_pair_f1_per_round.py   --summary-files     results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt     results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1p5_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt   --labels     "NeST (mult=1, subtask3)"     "NeST (mult=1.5, subtask3)"   --experiments-roots     /mnt/d/GithubRepo/UECA_ST/ep_split10_t1te1v1_u7_disjoint     /mnt/f/experiments/ep_split10_t1te1v1_u7_disjoint   --fold-start 1   --fold-end 10   --rounds 5   --metric all   --output-dir png   --output-name val_pair_per_round_v10   --no-std-band   --no-individual-seeds
+
+(unselected_correct_summary.txt):
+    python utils/analyze_unselected_correct_docs.py   --summary-files         results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt     results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_remove_pseudo_v2_CE_summary.txt     results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1p5_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt     results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1p5_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_remove_pseudo_v2_CE_summary.txt   --experiments-roots     /mnt/d/GithubRepo/UECA_ST/ep_split10_t1te1v1_u7_disjoint     /mnt/f/experiments/ep_split10_t1te1v1_u7_disjoint   --dataset-dir split10_train1_test1_val1_unlabeled7_disjoint   --fold-start 1   --fold-end 10   --selection-file-pattern doc_selection_history_fold{fold}.txt
+
+
+
+(png/unselected_correct_comparison_precision_groups_v10_bar.png):
+
+    python utils/plot_unselected_correct_comparison.py \
+        --summary-files \
+            results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt \
+            results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_remove_pseudo_v2_CE_summary.txt \
+            results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1p5_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt \
+            results_ep_split10_t1te1v1_u7_disjoint/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_mask_nestmul1p5_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_remove_pseudo_v2_CE_summary.txt \
+        --labels \
+            "(mult=1, subtask3)" \
+            "(mult=1)" \
+            "(mult=1.5, subtask3)" \
+            "(mult=1.5)"\
+        --experiments-roots \
+            /mnt/d/GithubRepo/UECA_ST/ep_split10_t1te1v1_u7_disjoint \
+            /mnt/f/experiments/ep_split10_t1te1v1_u7_disjoint \
+            /mnt/h/ep_split10_t1te1v1_u7_disjoint \
+        --metrics correct_rate \
+        --output-dir png \
+        --output-name unselected_correct_comparison_precision_groups_v10_bar \
+        --no-std-bar \
+        --plot-style bar
+
+
+
+
+    
+
+論文實驗腳本:
+
+Pair F1差異:
+    python utils/compute_fold_level_pair_f1_delta.py --left-summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_remove_pseudo_v2_CE_summary.txt --right-summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_st0_CE_summary.txt --experiments-root /mnt/h/ep_split10_t1v1te1_u7_aligned_disjoint_2019 --left-label ST --right-label ST0 --mean-delta-plot png/mean_delta_st_cause_vs_st0.png | tail -5
+    python utils/compute_fold_level_pair_f1_delta.py --left-summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_remove_pseudo_v2_CE_summary.txt --right-summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_st0_CE_summary.txt --experiments-root /mnt/h/ep_split10_t1v1te1_u7_aligned_disjoint_2019 --left-label ST --right-label ST0 --mean-delta-plot png/mean_delta_st_cause_vs_st0.png
+    python utils/compute_fold_level_pair_f1_delta.py --left-summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_remove_pseudo_v2_CE_summary.txt --right-summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_st0_CE_summary.txt --experiments-root /mnt/h/ep_split10_t1v1te1_u7_aligned_disjoint_2019 --left-label UECA-Prompt-NeST-emotion --right-label "w/o ST" --mean-delta-plot png/mean_delta_st_emotion_vs_st0.png
+    python utils/compute_fold_level_pair_f1_delta.py --left-summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt --right-summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_remove_pseudo_v2_CE_summary.txt --experiments-root /mnt/h/ep_split10_t1v1te1_u7_aligned_disjoint_2019 --left-label UECA-Prompt-NeST-a-Semo-Tpair --right-label "UECA-Prompt-NeST-Semo-Tpair" --match-pair-m1-background --mean-delta-plot png/mean_delta_NeST_a_emo_pair_vs_NeST_emo_pair.png
+    (白色):
+    python utils/compute_fold_level_pair_f1_delta.py --left-summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt --right-summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_st5_ste20_remove_pseudo_v2_CE_summary.txt --experiments-root /mnt/h/ep_split10_t1v1te1_u7_aligned_disjoint_2019 --left-label UECA-Prompt-NeST-a-Semo-Tpair --right-label "UECA-Prompt-NeST-Semo-Tpair" --match-pair-m1-background --mean-delta-plot png/mean_delta_NeST_a_emo_pair_vs_NeST_emo_pair.png
+自訓練模型不同來源比例:
+    python utils/inspect_avg3_checkpoint_sources.py --summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_cause_clause_knncause_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt --experiments-root /mnt/h/ep_split10_t1v1te1_u7_aligned_disjoint_2019 --csv-output png/avg3_checkpoint_sources_cause.csv | head -60
+    python utils/inspect_avgkpoint_sources.py --summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs01_nest_k5_cause_clause_knncause_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pv2_CE_summary.txt --experiments-root /mnt/h/ep_split10_t1v1te1_u7_aligned_disjoint_2019 --csv-output png/avg3_cint_sources_cause_v2.csv
+
+
+散度分佈圖:
+    python utils/report_selected_divergence_statistics.py --summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt --experiments-root /mnt/h/ep_split10_t1v1te1_u7_aligned_disjoint_2019 --fold-start 1 --fold-end 10 --round-start 1 --round-end 5 --quantile 0.40 --match-mode cause_pair
+    python utils/report_selected_divergence_statistics.py --summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt --experiments-root /mnt/h/ep_split10_t1v1te1_u7_aligned_disjoint_2019 --fold-start 1 --fold-end 10 --round-start 1 --round-end 5 --quantile 0.40 --match-mode pair
+    python utils/report_selected_divergence_statistics.py --summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul2_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt --experiments-root /mnt/h/ep_split10_t1v1te1_u7_aligned_disjoint_2019 --fold-start 1 --fold-end 10 --round-start 1 --round-end 5 --quantile 0.40
+    python utils/report_selected_divergence_statistics.py --summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k3_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt --experiments-root /mnt/h/ep_split10_t1v1te1_u7_aligned_disjoint_2019 --fold-start 1 --fold-end 10 --round-start 1 --round-end 5 --quantile 0.40
+    python utils/report_selected_divergence_statistics.py --summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k7_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt --experiments-root /mnt/h/ep_split10_t1v1te1_u7_aligned_disjoint_2019 --fold-start 1 --fold-end 10 --round-start 1 --round-end 5 --quantile 0.40
+    python utils/report_selected_divergence_statistics.py --summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k1_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt --experiments-root /mnt/h/ep_split10_t1v1te1_u7_aligned_disjoint_2019 --fold-start 1 --fold-end 10 --round-start 1 --round-end 5 --quantile 0.40 --match-mode pair
+
+
+    python utils/report_selected_divergence_statistics.py --summary results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k1_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt --experiments-root /mnt/h/ep_split10_t1v1te1_u7_aligned_disjoint_2019 --fold-start 1 --fold-end 10 --round-start 1 --round-end 5 --quantile 0.40
+
+    python utils/plot_selected_round_mean_bar.py --report png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_selected_divergence_statistics_round1_5_q040.txt --output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_grouped_bar_q040.png --all-output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_selected_all_bar_q040.png --match-mean-delta-background
+    python utils/plot_selected_round_mean_bar.py --report png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_selected_divergence_statistics_round1_5_q040_match_pair.txt --output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_grouped_bar_q040_match_pair.png --all-output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_selected_all_bar_q040_match_pair.png --title 被選中的未標註文檔在不同散度區間的情緒原因組合提取完全匹配率 --all-title 被選中的未標註文檔情緒原因組合提取完全匹配率 --match-mean-delta-background
+    python utils/plot_selected_round_mean_bar.py --report png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_selected_divergence_statistics_round1_5_q040_match_pair.txt --output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_grouped_bar_q040_match_pair_white.png --all-output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_selected_all_bar_q040_match_pair_white.png --title 被選中的未標註文檔在不同散度區間的情緒原因組合提取完全匹配率 --all-title 被選中的未標註文檔情緒原因組合提取完全匹配率 
+    python utils/plot_selected_round_mean_bar.py --report png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k1_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_selected_divergence_statistics_round1_5_q040_match_pair.txt --output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k1_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_grouped_bar_q040_match_pair.png --all-output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k1_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_selected_all_bar_q040_match_pair.png --title 被選中的未標註文檔在不同散度區間的情緒原因組合提取完全匹配率 --all-title 被選中的未標註文檔情緒原因組合提取完全匹配率 --match-mean-delta-background
+    python utils/plot_selected_round_mean_bar.py --report png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k1_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_selected_divergence_statistics_round1_5_q040_match_pair.txt --output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k1_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_grouped_bar_q040_match_pair_white.png --all-output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k1_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_selected_all_bar_q040_match_pair_white.png --title 被選中的未標註文檔在不同散度區間的情緒原因組合提取完全匹配率 --all-title 被選中的未標註文檔情緒原因組合提取完全匹配率
+    python utils/plot_selected_round_mean_bar.py --report png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_selected_divergence_statistics_round1_5_q040_match_cause_pair.txt --output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_grouped_bar_q040_match_cause_pair.png --all-output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_selected_all_bar_q040_match_cause_pair.png --title 被選中的未標註文檔在不同散度區間的原因與情緒原因組合提取完全匹配率 --all-title 被選中的未標註文檔原因與情緒原因組合提取完全匹配率 --match-mean-delta-background
+    python utils/plot_selected_round_mean_bar.py --report png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_selected_divergence_statistics_round1_5_q040_match_cause_pair.txt --output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_grouped_bar_q040_match_cause_pair_white.png --all-output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_selected_all_bar_q040_match_cause_pair_white.png --title 被選中的未標註文檔在不同散度區間的原因與情緒原因組合提取完全匹配率 --all-title 被選中的未標註文檔原因與情緒原因組合提取完全匹配率
+    python utils/plot_selected_round_mean_bar.py --report png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul2_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_selected_divergence_statistics_round1_3_q040.txt --output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul2_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_grouped_bar_q040.png --all-output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul2_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_selected_all_bar_q040.png
+    python utils/plot_selected_round_mean_bar.py --report png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k3_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_selected_divergence_statistics_round1_5_q040.txt --output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k3_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_grouped_bar_q040.png --all-output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k3_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_selected_all_bar_q040.png
+    python utils/plot_selected_round_mean_bar.py --report png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k1_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_selected_divergence_statistics_round1_5_q040.txt --output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k1_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_grouped_bar_q040.png --all-output png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k1_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_selected_all_bar_q040.png
+    
+    
+    如要改成平均版本，執行utils/plot_selected_round_mean_bar.py時需要代入--summary-type mean 
+
+
+輸出pair_m1_f1_vs_k_emotion_clause_nestmul1_no_errorbar.png:
+    python utils/plot_pair_m1_f1_vs_k.py --summaries results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k1_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k3_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k7_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt --output png/pair_m1_f1_vs_k_emotion_clause_nestmul1_no_errorbar.png --sparse-y-ticks --match-mean-delta-background
+    python utils/plot_pair_m1_f1_vs_k.py --summaries results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k1_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k3_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt results_ep_split10_t1v1te1_u7_aligned_disjoint_2019/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k7_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_summary.txt --output png/pair_m1_f1_vs_k_emotion_clause_nestmul1_no_errorbar_white.png --sparse-y-ticks
+輸出compare_k1_k5_round_pooled_selected_all_bar_q040.png:
+    python utils/plot_compare_selected_all_by_k.py --source-a png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k1_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_selected_all_bar_q040.png --source-b png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_selected_all_bar_q040.png --output png/selected_divergence_statistics/compare_k1_k5_round_pooled_selected_all_bar_q040.png --label-a k=1 --label-b k=5 --match-mean-delta-background
+    python utils/plot_compare_selected_all_by_k.py --source-a png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k1_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_selected_all_bar_q040_match_pair.png --source-b png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_selected_all_bar_q040_match_pair.png --output png/selected_divergence_statistics/compare_k1_k5_round_pooled_selected_match_pair_all_bar_q040.png --label-a k=1 --label-b k=5 --match-mean-delta-background
+    python utils/plot_compare_selected_all_by_k.py --source-a png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k1_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_selected_all_bar_q040_match_pair.png --source-b png/selected_divergence_statistics/UECA_Prompt_f1-10_i70_lr1e-5_bs8_wd0.01_nest_k5_emotion_clause_knnemotion_clause_nestmul1_nbeta0.1_nm0.6_gamma0.5_nlmnest_avgs_simple_st5_ste20_remove_pseudo_v2_CE_round_pooled_selected_all_bar_q040_match_pair.png --output png/selected_divergence_statistics/compare_k1_k5_round_pooled_selected_match_pair_all_bar_q040_white.png --label-a k=1 --label-b k=5
+
+
+統計多個情緒原因組合的Pair (m1) F1、Pair (m1) Precision、Pair (m1) Recall:
+    python utils/batch_analyze_pair_m1_by_summary.py --output-dir analysis/pair_m1_by_complexity_auto
+
+
+
+
+情緒類別與KNN、散度的關係圖:
+
+    python utils/plot_fold_divergence_mean_median.py \
+        --mean-only \
+        --background white \
+        --output png/final_model_k3_fold_raw_divergence_mean_white.png

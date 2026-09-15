@@ -21,6 +21,7 @@ import torch
 from torch.utils.data import DataLoader
 from transformers import BertTokenizer
 
+from NeST.model_weight_averaging import load_checkpoint_object
 from utils.unlabeled_dataset_compat import UnlabeledDatasetCompat, build_unlabeled_file_path
 
 # torch.load 以 pickle 還原整個模型物件時，需要在執行環境中找到 prompt_bert 類別
@@ -72,7 +73,7 @@ def parse_args() -> argparse.Namespace:
     )
     return p.parse_args()
 
-
+# 讀 summary.txt 檔內容，抓出裡面列出的實驗資料夾名稱
 def read_experiment_names_from_summary(summary_file: Path) -> List[str]:
     text = summary_file.read_text(encoding="utf-8", errors="ignore")
     names: List[str] = []
@@ -130,34 +131,94 @@ def resolve_experiment_dir(exp_name: str, roots: List[Path]) -> Path:
     return hits[0]
 
 
+def infer_test_model_type(exp_dir: Path) -> str:
+    exp_name = exp_dir.name
+
+    # v10 相關實驗實際以 avgs_simple 表示 Avg3 / subtask3
+    if "avgs_simple" in exp_name or re.search(r"_avgs(?:_simple)?_", exp_name):
+        return "self_training_avg3"
+
+    # st0 代表不做 self-training，測試時對應 initial best_pair
+    if re.search(r"_st0(?:_|$)", exp_name):
+        return "initial"
+
+    # 其餘像 st5_ste20、st10_ste3 這類命名，對應一般 self-training 模式
+    if re.search(r"_st\d+_ste\d+", exp_name):
+        return "self_training"
+
+    if "self_training_avg3" in exp_name:
+        return "self_training_avg3"
+    if "self_training" in exp_name:
+        return "self_training"
+    return "initial"
+
+
 def parse_checkpoint_file(ckpt_txt: Path) -> str | None:
     if not ckpt_txt.exists():
         return None
     for line in ckpt_txt.read_text(encoding="utf-8", errors="ignore").splitlines():
         if line.startswith("Checkpoint path:"):
-            raw = line.split("Checkpoint path:", 1)[1].strip()
-            return Path(raw).name
+            return line.split("Checkpoint path:", 1)[1].strip()
     return None
 
 
-def resolve_checkpoint(exp_dir: Path, fold: int, is_consistency: bool) -> Path:
-    if is_consistency:
-        meta = exp_dir / f"fold{fold}_best_val_checkpoint_pair.txt"
-        default_name = f"fold{fold}_self_training_best_pair.pth"
+def resolve_checkpoint_from_metadata(exp_dir: Path, metadata_file: Path) -> Path:
+    parsed = parse_checkpoint_file(metadata_file)
+    if not parsed:
+        raise FileNotFoundError(
+            f"metadata 檔案缺少 Checkpoint path: {metadata_file}"
+        )
+
+    parsed_name = Path(parsed).name
+    candidates = [
+        exp_dir / parsed_name,
+        exp_dir / "self_training_models" / parsed_name,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    searched = " / ".join(str(candidate) for candidate in candidates)
+    raise FileNotFoundError(
+        f"無法根據 metadata 解析 checkpoint: {metadata_file}\n"
+        f"Checkpoint path={parsed}\n已嘗試: {searched}"
+    )
+
+
+def resolve_single_checkpoint(exp_dir: Path, fold: int, test_model_type: str) -> Path:
+    if test_model_type == "initial":
+        metadata_file = exp_dir / f"fold{fold}_best_val_checkpoint.txt"
+    elif test_model_type == "self_training":
+        metadata_file = exp_dir / f"fold{fold}_best_val_checkpoint_pair.txt"
     else:
-        meta = exp_dir / f"fold{fold}_best_val_checkpoint.txt"
-        default_name = f"fold{fold}_self_training_best.pth"
+        raise ValueError(f"不支援的 test_model_type: {test_model_type}")
 
-    parsed_name = parse_checkpoint_file(meta)
-    name = parsed_name if parsed_name else default_name
+    if not metadata_file.exists():
+        raise FileNotFoundError(
+            f"找不到與 test_model_type={test_model_type} 對應的 metadata: {metadata_file}"
+        )
+    return resolve_checkpoint_from_metadata(exp_dir, metadata_file)
 
-    cand1 = exp_dir / "self_training_models" / name
-    cand2 = exp_dir / name
-    if cand1.exists():
-        return cand1
-    if cand2.exists():
-        return cand2
-    raise FileNotFoundError(f"找不到 checkpoint: {cand1} / {cand2}")
+
+def load_eval_model(exp_dir: Path, fold: int, test_model_type: str, device: torch.device):
+    if test_model_type == "self_training_avg3":
+        ckpt = exp_dir / "self_training_models" / f"fold{fold}_self_training_best_avg3.pth"
+        if not ckpt.exists():
+            raise FileNotFoundError(
+                "找不到 self_training_avg3 預存模型: "
+                f"{ckpt}。依目前設定不會 fallback 重建 Avg3 模型。"
+            )
+        model = load_checkpoint_object(ckpt, map_location=device)
+        model_desc = f"self_training_avg3: {ckpt}"
+    else:
+        ckpt = resolve_single_checkpoint(exp_dir, fold, test_model_type)
+        model = load_checkpoint_object(ckpt, map_location=device)
+        model_desc = f"{test_model_type}: {ckpt}"
+
+    model.eval()
+    if device.type == "cuda":
+        model = model.cuda()
+    return model, model_desc
 
 
 def find_pseudo_results_dir(exp_dir: Path) -> Path:
@@ -180,7 +241,7 @@ def sort_doc_ids(doc_ids: List[str]) -> List[str]:
 def write_all_correct_cache(
     exp_dir: Path,
     fold: int,
-    ckpt: Path,
+    checkpoint_desc: str,
     doc_ids: List[str],
     cache_pattern: str,
 ) -> Path:
@@ -191,7 +252,7 @@ def write_all_correct_cache(
     payload = {
         "experiment_dir": str(exp_dir),
         "fold": fold,
-        "checkpoint": str(ckpt),
+        "checkpoint": checkpoint_desc,
         "count": len(doc_ids),
         "doc_ids": sort_doc_ids(doc_ids),
     }
@@ -261,7 +322,6 @@ def eval_one_experiment(
     fold_end: int,
     batch_size: int,
     device: torch.device,
-    is_consistency: bool,
     save_all_correct_cache: bool,
     all_correct_cache_pattern: str,
 ) -> FoldStat:
@@ -271,6 +331,7 @@ def eval_one_experiment(
     stat = FoldStat()
     # 取得 tokenizer 中 [MASK] 的 token id，後續用來抓每筆輸入的 mask 位置
     mask_id = tokenizer.mask_token_id
+    test_model_type = infer_test_model_type(exp_dir)
 
     # 逐 fold 執行評估 (例如 fold1~fold10)
     for fold in range(fold_start, fold_end + 1):
@@ -295,15 +356,8 @@ def eval_one_experiment(
         # 建立推論 DataLoader (不打亂，確保索引對應可追蹤)
         loader = DataLoader(ds, batch_size=batch_size, shuffle=False)
 
-        # 解析該 fold 應使用的 checkpoint (baseline / consistency 規則不同)
-        ckpt = resolve_checkpoint(exp_dir, fold, is_consistency)
-        # 載入模型到指定裝置
-        model = torch.load(str(ckpt), map_location=device)
-        # 切換為 eval 模式 (關閉 dropout / BN 訓練行為)
-        model.eval()
-        # 若使用 GPU，將模型搬到 CUDA
-        if device.type == "cuda":
-            model = model.cuda()
+        # 解析該 fold 應使用的測試模型；第一步先對齊單一 checkpoint 規則
+        model, checkpoint_desc = load_eval_model(exp_dir, fold, test_model_type, device)
 
         # ptr 用來追蹤目前 batch 在整個 dataset 的起始索引
         # 因為 DataLoader 只回傳 x_bert，需要靠 ptr 對回 ds.doc_id
@@ -379,14 +433,18 @@ def eval_one_experiment(
                 ptr += x_np.shape[0]
 
             # 記錄本 fold 明細，供後續報表列出每輪（fold）結果
-            stat.per_fold[fold] = (fold_all_doc_correct, fold_total_docs, str(ckpt))
+            stat.per_fold[fold] = (
+                fold_all_doc_correct,
+                fold_total_docs,
+                checkpoint_desc,
+            )
 
             # 需要時輸出快取，供 analyze_unselected_correct_docs.py 直接讀取
             if save_all_correct_cache:
                 cache_path = write_all_correct_cache(
                     exp_dir=exp_dir,
                     fold=fold,
-                    ckpt=ckpt,
+                    checkpoint_desc=checkpoint_desc,
                     doc_ids=fold_all_doc_correct_ids,
                     cache_pattern=all_correct_cache_pattern,
                 )
@@ -485,7 +543,6 @@ def main() -> None:
                     fold_end=args.fold_end,
                     batch_size=args.batch_size,
                     device=device,
-                    is_consistency=True,
                     save_all_correct_cache=args.save_all_correct_cache,
                     all_correct_cache_pattern=args.all_correct_cache_pattern,
                 )
@@ -515,7 +572,6 @@ def main() -> None:
                     fold_end=args.fold_end,
                     batch_size=args.batch_size,
                     device=device,
-                    is_consistency=consistency_only_mode,
                     save_all_correct_cache=args.save_all_correct_cache,
                     all_correct_cache_pattern=args.all_correct_cache_pattern,
                 )

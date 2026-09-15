@@ -1,130 +1,245 @@
 # NeST Loss Mode 計算方式說明
 
-本文檔詳細說明 `nest_loss_mode` 參數的兩種模式（`standard` 和 `nest`）在計算偽標籤損失時的不同實作方式。
+本文檔詳細說明 `nest_loss_mode` 參數在目前 [UECA_CE_few_shot_ST_nest_consistency_somc_v2.py](UECA_CE_few_shot_ST_nest_consistency_somc_v2.py) 中的實作方式，特別是：
+
+1. 監督式損失 $L_{sup}$ 的正確定義
+2. 偽標籤損失 $L_{st}$ 在 `standard` 與 `nest` 模式下的差異
+3. self-training 階段總損失如何由 $L_{sup}$ 與 $L_{st}$ 組成
 
 ---
 
 ## 參數定義
 
-在 `UECA_CE_few_shot_ST_nest.py` 中：
+在 [UECA_CE_few_shot_ST_nest_consistency_somc_v2.py](UECA_CE_few_shot_ST_nest_consistency_somc_v2.py) 中：
 
 ```python
-parser.add_argument('--nest_loss_mode', type=str, default='standard',
-                    choices=['standard', 'nest'],
-                    help='NeST loss 計算模式: standard=所有偽標籤都計入, nest=只有信心>γ才計入')
+parser.add_argument('--nest_loss_mode', type=str, default='nest',
+                                        choices=['standard', 'nest', 'nest_dynamic_gamma_round0'],
+                                        help='NeST loss 計算模式: standard=所有偽標籤都計入, nest=只有信心>γ才計入, nest_dynamic_gamma_round0=搭配 consistency_all_equal_round0_only 時第1輪使用 gamma=0.1')
 parser.add_argument('--nest_loss_threshold', type=float, default=0.9,
-                    help='nest 模式下的信心閾值 (對應論文的 γ，預設 0.9)的nest_loss_threshold: 信心閾值 γ (僅在 nest 模式下使用，預設 0.9)
+                                        help='nest 模式下的信心閾值 (對應論文的 γ，預設 0.9)')
 ```
 
 ---
 
-## 模式 1: `standard` (標準模式)
+## 目前程式中的 $L_{sup}$ 是什麼
 
-### 概念說明
+如果要和目前的程式實作精確對應，$L_{sup}$ 應該理解成：
 
-**所有偽標籤樣本的所有 [MASK] 位置都計入損失**，不使用閥值過濾。
+- 學生模型對 labeled 樣本的有效 [MASK] 位置
+- 與真實 token 標籤之間的平均 Cross-Entropy loss
 
-### 數學公式
+### 1. 最貼近程式碼的 batch-level 定義
 
-對於一個批次中的偽標籤樣本集合 $\mathcal{P}$，損失計算為：
-
-$$
-\mathcal{L}_{\text{pseudo}} = \frac{1}{|\mathcal{P}|} \sum_{x_j \in \mathcal{P}} \mathcal{L}_{\text{CE}}(f(x_j; \theta), \tilde{y}_j)
-$$
-
-其中：
-- $\mathcal{P}$：批次中的偽標籤樣本集合
-- $|\mathcal{P}|$：偽標籤樣本數量 (`pseudo_mask.sum()`)
-- $x_j$：第 $j$ 個偽標籤樣本的輸入序列
-- $\tilde{y}_j$：第 $j$ 個樣本的偽標籤序列（僅 [MASK] 位置有值，其餘為 -100）
-- $f(x_j; \theta)$：模型對輸入 $x_j$ 的預測輸出
-- $\mathcal{L}_{\text{CE}}$：Cross-Entropy 損失函數
-
-**展開 Cross-Entropy 計算**（針對單個樣本的所有 [MASK] 位置）：
+對於目前一個 self-training mini-batch 中的 labeled 子集合 $\mathcal{B}_l$，監督式損失可寫為：
 
 $$
-\mathcal{L}_{\text{CE}}(f(x_j; \theta), \tilde{y}_j) = -\frac{1}{M_j} \sum_{i \in \mathcal{M}_j} \log p_\theta(\tilde{y}_j^{(i)} | x_j)
+L_{sup}^{(\mathcal{B})}(\theta_s)
+=
+-\frac{1}{|M_l^{(\mathcal{B})}|}
+\sum_{(x_i, y_i) \in \mathcal{B}_l}
+\sum_{m \in M(x_i)}
+\log p_{\theta_s}(y_{i,m} \mid x_i, m)
 $$
 
 其中：
-- $\mathcal{M}_j$：樣本 $x_j$ 中所有 [MASK] 位置的集合
-- $M_j = |\mathcal{M}_j|$：[MASK] 位置的數量
-- $\tilde{y}_j^{(i)}$：第 $i$ 個 [MASK] 位置的偽標籤 token id
-- $p_\theta(\tilde{y}_j^{(i)} | x_j)$：模型對該位置預測為 $\tilde{y}_j^{(i)}$ 的機率
 
-### 程式碼實作
+- $\mathcal{B}_l$
+    - 目前 mini-batch 中的 labeled 樣本集合
+- $M(x_i)$
+    - 樣本 $x_i$ 中所有有效 [MASK] 位置的集合
+- $|M_l^{(\mathcal{B})}|$
+    - 當前 labeled mini-batch 中所有有效 [MASK] 位置的總數
+- $y_{i,m}$
+    - 樣本 $x_i$ 在位置 $m$ 的真實 token 標籤
+- $p_{\theta_s}(y_{i,m} \mid x_i, m)$
+    - 學生模型在位置 $m$ 對真實答案 token 的預測機率
+
+這個寫法比資料集層級版本更貼近目前程式，因為程式實際上是以 mini-batch 方式訓練與更新參數
+
+### 2. 若寫成資料集層級，也可以這樣表示
+
+$$
+L_{sup}(\theta_s)
+=
+-\frac{1}{|M_l|}
+\sum_{(x_i, y_i) \in D_L}
+\sum_{m \in M(x_i)}
+\log p_{\theta_s}(y_{i,m} \mid x_i, m)
+$$
+
+其中：
+
+- $D_L$ 為 labeled dataset
+- $|M_l|$ 為所有 labeled 文件中有效 [MASK] 位置的總數
+
+要特別注意：
+
+- $|M_l|$ 不是單一文件的 [MASK] 數量
+- 而是整個 labeled 集合或當前 labeled batch 中的有效 [MASK] 總數
+
+### 3. HuggingFace BertForMaskedLM
+
+目前 `prompt_bert.forward(...)` 的實作是：
 
 ```python
-# 位置: UECA_CE_few_shot_ST_nest.py, 行 3399-3402
-if opt.nest_loss_mode == 'standard':
-    # 標準方式: 所有偽標籤都計入 loss
-    loss_p, logits_p = model(x_p.cuda() if use_gpu else x_p, 
-                             mask_label_p.cuda() if use_gpu else mask_label_p)
-    loss_p = loss_p / pseudo_mask.sum()
+def forward(self, x_bert, labels):
+        output = self.bert(x_bert, labels=labels)
+        loss, logits = output.loss, output.logits
+        return loss, logits
 ```
 
-**關鍵說明**：
-1. `model(x_p, mask_label_p)` 會自動計算 Cross-Entropy loss，忽略 `mask_label_p` 中值為 `-100` 的位置
-2. 回傳的 `loss_p` 是所有樣本、所有有效 [MASK] 位置的 **總損失之和**
-3. `loss_p / pseudo_mask.sum()` 除以批次中的偽標籤**樣本數量**，得到每個樣本的平均損失
+這裡直接呼叫 HuggingFace `BertForMaskedLM` 的內建 masked language modeling loss。它的計算方式是：
+
+1. 對 `labels != -100` 的位置計算 Cross-Entropy
+2. 對 `labels == -100` 的位置完全忽略
+3. 最後回傳所有有效位置的平均 loss
+
+因此，程式中的 `loss_l` 正是上面公式所表示的「有效 [MASK] 位置平均 Cross-Entropy」
+
+### 4. labeled 樣本的真實 target 是怎麼建立的
+
+在 `MyDataset` 中，程式先建立完整文件的 token 序列 `full_document`，再建立只在 [MASK] 位置保留真實答案、其他位置設為 `-100` 的 `mask_labels`：
+
+```python
+labels = full_document.masked_fill(mask_full_document != 103, -100)
+mask_labels = full_document.masked_fill(mask_label_full_document != 103, -100)
+```
+
+其中和監督式損失直接對應的是：
+
+- `mask_labels`
+
+因為只有它保留了有效 [MASK] 位置上的真實答案 token id
+
+也就是說：
+
+- 非 [MASK] 位置不參與 loss
+- 每個有效 [MASK] 位置都會對應一個真實 token label
+- 這些位置包含情緒、原因與配對三種類型的 [MASK]
+
+所以目前程式中的 $L_{sup}$ 並不是只算 emotion 或 cause，而是：
+
+- 同時對情緒 [MASK]
+- 原因 [MASK]
+- 配對 [MASK]
+
+共同計算平均 Cross-Entropy
+
+### 5. self-training 階段的 `loss_l` 在哪裡對應到 $L_{sup}$
+
+在 self-training 內層訓練迴圈中：
+
+```python
+if labeled_mask.sum() > 0:
+        x_l = x_bert[labeled_mask]
+        mask_label_l = mask_label[labeled_mask]
+        loss_l, _ = model(x_l.cuda() if use_gpu else x_l, mask_label_l.cuda() if use_gpu else mask_label_l)
+else:
+        loss_l = 0
+```
+
+這裡的：
+
+- `x_l`
+    - 就是目前 mini-batch 中的 labeled 輸入
+- `mask_label_l`
+    - 就是目前 mini-batch 中 labeled 樣本在有效 [MASK] 位置上的真實 token 標籤
+- `loss_l`
+    - 就是目前程式中實際計算出來的 $L_{sup}$
+
+因此，若要在論文中直接對應程式碼，最精確的一句話是：
+
+> 在目前的 `UECA_CE_few_shot_ST_nest_consistency_somc_v2.py` 中，$L_{sup}$ 就是對 labeled mini-batch 的 `mask_label_l` 所對應之所有有效 [MASK] 位置，計算平均 Cross-Entropy loss 的結果，也就是程式中的 `loss_l`
 
 ---
 
-## 模式 2: `nest` 
+
+## 模式 1: `nest` 
 
 ### 概念說明
 
-**只有模型對偽標籤預測信心度超過閾值 γ 的 [MASK] 位置才計入損失**。這是 NeST 論文的核心改進，通過過濾低信心預測來提升偽標籤質量。
+**只有模型對偽標籤預測信心度超過閾值 γ 的 [MASK] 位置才計入損失**。沿用了既有 semi-supervised / self-training 文獻中的做法，其中 Sohn et al. (2020) 是 FixMatch
+
+因此 NeST 在學生模型訓練階段仍採用帶有 confidence threshold 的 pseudo-label loss
 
 ### 數學公式
 
-對應 NeST 論文公式 (5)：
+若要**精確對應目前 `UECA_CE_few_shot_ST_nest_consistency_somc_v2.py` 的實作**，`nest` 模式下的 pseudo loss 更適合寫成下式，而不要直接寫成以 $|\mathcal{P}|$ 為分母的 sample-level 簡寫：
 
 $$
-\mathcal{L}_{\text{pseudo}} = \frac{1}{|\mathcal{P}|} \sum_{x_j \in \mathcal{P}} \sum_{i \in \mathcal{M}_j} \mathbb{1}\left\{ p_\theta(\tilde{y}_j^{(i)} | x_j) > \gamma \right\} \cdot \left( -\log p_\theta(\tilde{y}_j^{(i)} | x_j) \right)
+\mathcal{L}_{\text{pseudo}}^{(\mathcal{B})}
+=
+\begin{cases}
+\dfrac{1}{|M_{p,\gamma}^{(\mathcal{B})}|}
+\sum\limits_{(x_j, \hat{y}_j) \in \mathcal{B}_p}
+\sum\limits_{i \in M(x_j)}
+\mathbb{1}\left\{ p_\theta(\hat{y}_j^{(i)} \mid x_j) > \gamma \right\}
+\left( -\log p_\theta(\hat{y}_j^{(i)} \mid x_j) \right), & |M_{p,\gamma}^{(\mathcal{B})}| > 0 \\
+0, & |M_{p,\gamma}^{(\mathcal{B})}| = 0
+\end{cases}
 $$
+
+其中：
+
+- $\mathcal{B}_p$
+    - 目前 mini-batch 中的 pseudo-labeled 樣本集合
+- $M(x_j)$
+    - 樣本 $x_j$ 中所有有效 pseudo [MASK] 位置的集合，也就是同時滿足 `x_bert == 103` 且 `mask_label != -100` 的位置
+- $M_{p,\gamma}^{(\mathcal{B})}$
+    - 當前 pseudo mini-batch 中，所有同時滿足「有效 pseudo [MASK] 位置」且「模型對對應偽標籤的預測機率大於 $\gamma$」的位置集合
+- $|M_{p,\gamma}^{(\mathcal{B})}|$
+    - 也就是目前程式在 `nest` 模式下實際作為平均分母的數量，也就是通過 threshold 的有效 pseudo token 數
+
+若只是想對照論文 Section 3.2 的概念，可以把它理解為「對 unlabeled loss 加上一個 thresholding function」；但若要和目前程式逐行對齊，分母必須寫成通過 threshold 的 token 數，而不是 $|\mathcal{P}|$。
 
 **分步說明**：
 
 1. **計算預測機率**（針對每個 [MASK] 位置）：
    $$
-   p_\theta(\tilde{y}_j^{(i)} | x_j) = \text{softmax}(f(x_j; \theta))_{\tilde{y}_j^{(i)}}
+    p_\theta(\hat{y}_j^{(i)} | x_j) = \text{softmax}(f(x_j; \theta))_{\hat{y}_j^{(i)}}
    $$
 
 2. **應用信心度過濾**（指示函數）：
    $$
-   \mathbb{1}\left\{ p_\theta(\tilde{y}_j^{(i)} | x_j) > \gamma \right\} = 
+    \mathbb{1}\left\{ p_\theta(\hat{y}_j^{(i)} | x_j) > \gamma \right\} = 
    \begin{cases}
-   1, & \text{if } p_\theta(\tilde{y}_j^{(i)} | x_j) > \gamma \\
+    1, & \text{if } p_\theta(\hat{y}_j^{(i)} | x_j) > \gamma \\
    0, & \text{otherwise}
    \end{cases}
    $$
 
 3. **只對信心度高的位置計算 Cross-Entropy**：
    $$
-   \mathcal{L}_{\text{CE}}^{\text{filtered}}(x_j, \tilde{y}_j) = \frac{1}{N_j^{\text{confident}}} \sum_{i \in \mathcal{M}_j^{\text{confident}}} \left( -\log p_\theta(\tilde{y}_j^{(i)} | x_j) \right)
+    \mathcal{L}_{\text{CE}}^{\text{filtered}}(x_j, \hat{y}_j) = \frac{1}{N_j^{\text{confident}}} \sum_{i \in \mathcal{M}_j^{\text{confident}}} \left( -\log p_\theta(\hat{y}_j^{(i)} | x_j) \right)
    $$
    
    其中：
-   - $\mathcal{M}_j^{\text{confident}} = \{ i \in \mathcal{M}_j : p_\theta(\tilde{y}_j^{(i)} | x_j) > \gamma \}$：通過信心度篩選的 [MASK] 位置
+    - $\mathcal{M}_j^{\text{confident}} = \{ i \in \mathcal{M}_j : p_\theta(\hat{y}_j^{(i)} | x_j) > \gamma \}$：通過信心度篩選的 [MASK] 位置
    - $N_j^{\text{confident}} = |\mathcal{M}_j^{\text{confident}}|$：通過篩選的位置數量
 
-4. **對所有樣本取平均**：
-   $$
-   \mathcal{L}_{\text{pseudo}} = \frac{1}{|\mathcal{P}|} \sum_{x_j \in \mathcal{P}} \mathcal{L}_{\text{CE}}^{\text{filtered}}(x_j, \tilde{y}_j)
-   $$
+4. **在目前 v2 程式中，最後不是對 pseudo 樣本數取平均，而是直接對所有通過 threshold 的有效 token 取平均**：
+    $$
+    \mathcal{L}_{\text{pseudo}}^{(\mathcal{B})}
+    =
+    \frac{1}{|M_{p,\gamma}^{(\mathcal{B})}|}
+     \sum_{(x_j, \hat{y}_j) \in \mathcal{B}_p}
+    \sum_{i \in M(x_j)}
+     \mathbb{1}\left\{ p_\theta(\hat{y}_j^{(i)} \mid x_j) > \gamma \right\}
+     \left( -\log p_\theta(\hat{y}_j^{(i)} \mid x_j) \right)
+    $$
+    也就是說，對應目前程式的實際分母是 `confident_token_count`，不是 pseudo sample 數 $|\mathcal{P}|$。
 
 ### 程式碼實作
 
 ```python
-# 位置: UECA_CE_few_shot_ST_nest.py, 行 3395-3398
-if opt.nest_loss_mode == 'nest':
-    # NeST 論文的 threshold 過濾方式: 只有信心 > γ 的位置才計入 loss
-    loss_p = compute_nest_threshold_loss(model, x_p, mask_label_p, 
-                                         opt.nest_loss_threshold, use_gpu)
+if opt.nest_loss_mode in ('nest', 'nest_dynamic_gamma_round0'):
+    loss_p, valid_tokens_batch, confident_tokens_batch = compute_nest_threshold_loss(
+        model, x_p, mask_label_p, opt.nest_loss_threshold, use_gpu, return_stats=True
+    )
 ```
 
-**`compute_nest_threshold_loss` 函數實作細節**（行 810-875）：
+**`compute_nest_threshold_loss` 函數實作細節**：
 
 ```python
 def compute_nest_threshold_loss(model, x_bert, mask_label, threshold, use_gpu):
@@ -161,9 +276,53 @@ def compute_nest_threshold_loss(model, x_bert, mask_label, threshold, use_gpu):
     confident_probs = target_probs[confident_mask]  # (num_confident,)
     ce_losses = -torch.log(confident_probs + 1e-10)  # -log p_θ(...)
     
-    # 回傳平均 loss (對應公式中的 1/|P| Σ)
+    # 回傳平均 loss (實際分母是通過 threshold 的有效 pseudo token 數)
     return ce_losses.mean()
 ```
+
+---
+
+## self-training 階段總損失如何由 $L_{sup}$ 與 $L_{st}$ 組成
+
+在目前 v2 程式的 self-training 迴圈中，總損失組合如下：
+
+```python
+if opt.nest_loss_mode in ('nest', 'nest_dynamic_gamma_round0'):
+        total_loss = current_round_gamma * loss_l + (1 - current_round_gamma) * loss_p
+else:
+        total_loss = loss_l + current_round_gamma * loss_p
+```
+
+這表示：
+
+### 1. `nest` / `nest_dynamic_gamma_round0` 模式
+
+$$
+L_{total}
+=
+\lambda L_{sup} + (1-\lambda)L_{st}
+$$
+
+其中：
+
+- $L_{sup}$ 對應 `loss_l`
+- $L_{st}$ 對應 `loss_p`
+- $\lambda$ 對應 `current_round_gamma`
+
+### 2. `standard` 模式
+
+$$
+L_{total}
+=
+L_{sup} + \gamma L_{st}
+$$
+
+所以如果論文文字要完全對應目前程式，必須分清楚：
+
+- 你若寫 $L_{total}=\lambda L_{sup}+(1-\lambda)L_{st}$
+    - 這對應的是 `nest` 類模式
+- 你若寫 `standard` 模式
+    - 目前程式實作其實是 $L_{sup} + \gamma L_{st}$
 
 ---
 
@@ -171,12 +330,18 @@ def compute_nest_threshold_loss(model, x_bert, mask_label, threshold, use_gpu):
 
 | 特性 | `standard` 模式 | `nest` 模式 |
 |------|----------------|------------|
-| **處理方式** | 所有 [MASK] 位置都計入 | 只計算信心度 > γ 的位置 |
-| **公式** | $\mathcal{L} = \frac{1}{\|\mathcal{P}\|} \sum_{x_j} \mathcal{L}_{\text{CE}}(f(x_j), \tilde{y}_j)$ | $\mathcal{L} = \frac{1}{\|\mathcal{P}\|} \sum_{x_j} \sum_i \mathbb{1}\\{p > \gamma\\} \cdot (-\log p)$ |
+| **處理方式** | 所有 pseudo [MASK] 位置都計入 | 只計算信心度 > γ 的 pseudo [MASK] 位置 |
+| **公式** | $\mathcal{L} = \frac{1}{\|\mathcal{P}\|} \sum_{x_j} \mathcal{L}_{\text{CE}}(f(x_j), \hat{y}_j)$ | $\mathcal{L} = \frac{1}{\|\mathcal{P}\|} \sum_{x_j} \sum_i \mathbb{1}\\{p > \gamma\\} \cdot (-\log p)$ |
 | **優點** | 簡單直接，利用所有偽標籤 | 過濾低質量預測，提升偽標籤質量 |
 | **缺點** | 可能被錯誤偽標籤誤導 | 可能過度保守，丟棄部分有用訊號 |
-| **適用場景** | 偽標籤質量較高時 | 偽標籤質量參差不齊時（NeST 推薦） |
-| **計算成本** | 較低（直接調用 model 內建 loss） | 較高（需手動計算 softmax 和過濾） |
+
+---
+
+## 一句話總結目前程式中的 $L_{sup}$
+
+若只保留一句最精確、最能對應程式碼的說明，可以寫成：
+
+> 在 `UECA_CE_few_shot_ST_nest_consistency_somc_v2.py` 中，$L_{sup}$ 是學生模型對 labeled mini-batch 中所有有效 [MASK] 位置之真實 token 標籤所計算的平均 Cross-Entropy loss，程式中對應的變數是 `loss_l`，其 targets 來自 `MyDataset` 建立的 `mask_label`
 
 ---
 

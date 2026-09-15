@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-繪製「不同 seed 在各自訓練輪次的驗證集 Pair F1」曲線圖
+繪製「不同 seed 在各自訓練輪次的驗證集 Emotion / Cause / Pair 指標」曲線圖
 
 資料來源:
-  - init_supervised_metrics/fold{fold}_init_supervised_metrics.txt  → Round 0
-  - self_training_results_*/self_training_val_results_fold{fold}_round{r}.txt → Round 1~N
+    - init_supervised_metrics/fold{fold}_init_supervised_metrics.txt  → Round 0
+    - self_training_results_*/self_training_val_results_fold{fold}_round{r}.txt → Round 1~N
 
 繪圖邏輯:
-  1) 每個 seed、每個 round: 讀取 10 折驗證 Pair F1 → 計算 10 折平均
-  2) 每個 experiment group (如 baseline / consistency):
+    1) 每個 seed、每個 round: 讀取 10 折驗證 Emotion / Cause / Pair 指標 → 計算 10 折平均
+    2) 每個 experiment group (如 baseline / consistency):
      - 各 seed 畫一條淡色線
      - 3 seed 的平均畫一條粗線 ± std 帶
 
@@ -28,6 +28,12 @@
     --summary-files results_ep.../xxx_summary.txt \
     --labels "Consistency" \
     --experiments-root ep_split10_t1te1v1_u7_disjoint
+
+若想畫 Emotion F1，可再加上:
+    --target emotion --metric f1
+
+若想畫 Cause F1，可再加上:
+    --target cause --metric f1
 """
 
 from __future__ import annotations
@@ -50,6 +56,30 @@ plt.rcParams['axes.unicode_minus'] = False  # 解決負號顯示問題
 # 定義字體物件，供需要精確控制時使用
 FONT_CHINESE = 'DFKai-SB'   # 標楷體
 FONT_ENGLISH = 'Calisto MT'  # Calisto MT 英文字體
+
+TARGET_INDEX = {
+    "emotion": 0,
+    "cause": 1,
+    "pair": 2,
+}
+
+TARGET_LABELS = {
+    "emotion": "Emotion",
+    "cause": "Cause",
+    "pair": "Pair",
+}
+
+METRIC_LABELS = {
+    "f1": "F1",
+    "precision": "Precision",
+    "recall": "Recall",
+}
+
+INIT_METRIC_LABELS = {
+    "f1": "F1",
+    "precision": "P",
+    "recall": "R",
+}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -166,11 +196,20 @@ def get_short_label(name: str) -> str:
 
 # ── 讀取初始監督指標 (Round 0) ─────────────────────────────────
 
-def parse_init_pair_metric(path: Path, metric: str = "f1") -> float | None:
+def extract_metric_values(metric_blob: str) -> list[float]:
+    """從 [tensor(0.1234), 0.5678] 這類片段中擷取所有數值。"""
+    number_strings = re.findall(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)", metric_blob)
+    return [float(v) for v in number_strings]
+
+
+def parse_init_metric(path: Path, target: str = "pair", metric: str = "f1") -> float | None:
     """
-    從 init_supervised_metrics.txt 讀 Pair 指標
+        從 init_supervised_metrics.txt 讀 Emotion / Cause / Pair 指標
+        target: 'emotion' / 'cause' / 'pair'
     metric: 'f1' / 'precision' / 'recall'
     格式:
+            Emotion F1: [tensor(0.7958)]
+            Cause F1: [tensor(0.5810)]
       Pair F1: [tensor(0.5160)]
       Pair P: [0.5271739130148275]
       Pair R: [tensor(0.5052)]
@@ -182,33 +221,31 @@ def parse_init_pair_metric(path: Path, metric: str = "f1") -> float | None:
     # 讀取 Round 0 指標檔內容
     text = path.read_text(encoding="utf-8", errors="ignore")
 
-    # 依 metric 選擇對應的正則解析規則
-    if metric == "f1":
-        m = re.search(r"Pair F1:\s*\[tensor\(([\d.]+)\)\]", text)
-    elif metric == "precision":
-        # Pair P: [0.527...] (不含 tensor)
-        m = re.search(r"Pair P:\s*\[([\d.]+)\]", text)
-    elif metric == "recall":
-        m = re.search(r"Pair R:\s*\[tensor\(([\d.]+)\)\]", text)
-    else:
+    target_label = TARGET_LABELS.get(target)
+    metric_label = INIT_METRIC_LABELS.get(metric)
+    if target_label is None or metric_label is None:
         return None
-    # 有匹配才轉成浮點數，否則回傳 None
-    if m:
-        return float(m.group(1))
-    return None
+
+    m = re.search(rf"{target_label}\s+{metric_label}:\s*\[(.*?)\]", text)
+    if not m:
+        return None
+
+    values = extract_metric_values(m.group(1))
+    return values[-1] if values else None
 
 
 # ── 讀取自訓練 round N 驗證指標 ────────────────────────────────
 
-def parse_val_pair_metric(path: Path, metric: str = "f1") -> float | None:
+def parse_val_metric(path: Path, target: str = "pair", metric: str = "f1") -> float | None:
     """
-    從 self_training_val_results_fold{f}_round{r}.txt 讀 Pair 指標
+        從 self_training_val_results_fold{f}_round{r}.txt 讀 Emotion / Cause / Pair 指標
+        target: 'emotion' / 'cause' / 'pair'
     metric: 'f1' / 'precision' / 'recall'
     格式:
       Precision (Emotion, Cause, Pair): 0.7865, 0.6053, 0.5272
       Recall (Emotion, Cause, Pair): 0.7407, 0.4792, 0.5052
       F1 Score (Emotion, Cause, Pair): 0.7629, 0.5349, 0.5160
-    取最後一行對應指標的第三個值 (Pair)
+        取最後一行對應指標的 emotion / cause / pair 值
     """
     # 檔案不存在表示該 fold/round 無結果
     if not path.exists():
@@ -226,13 +263,16 @@ def parse_val_pair_metric(path: Path, metric: str = "f1") -> float | None:
         pattern = r"Recall \(Emotion, Cause, Pair\):\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)"
     else:
         return None
+    target_idx = TARGET_INDEX.get(target)
+    if target_idx is None:
+        return None
+
     # 可能同檔案中有多次輸出，先全部找出
     matches = re.findall(pattern, text)
     if not matches:
         return None
     # 最後一筆 = 該 round 最終結果
-    # [2] 代表 (Emotion, Cause, Pair) 中的第三個值 Pair
-    return float(matches[-1][2])
+    return float(matches[-1][target_idx])
 
 
 # ══════════════════════════════════════════════════════════════
@@ -244,6 +284,7 @@ def collect_group_data(
     fold_start: int,
     fold_end: int,
     num_rounds: int,
+    target: str = "pair",
     metric: str = "f1",
 ) -> dict:
     """
@@ -256,6 +297,7 @@ def collect_group_data(
       },
       ...
     }
+    target: 'emotion' / 'cause' / 'pair'
     metric: 'f1' / 'precision' / 'recall'
     """
     # num_folds 目前主要供語意說明，實際平均以讀到的 fold_vals 為準
@@ -286,10 +328,18 @@ def collect_group_data(
             for fold in range(fold_start, fold_end + 1):
                 if r == 0:
                     # Round 0 = 初始監督
-                    val = parse_init_pair_metric(init_dir / f"fold{fold}_init_supervised_metrics.txt", metric)
+                    val = parse_init_metric(
+                        init_dir / f"fold{fold}_init_supervised_metrics.txt",
+                        target=target,
+                        metric=metric,
+                    )
                 else:
                     # Round 1~N = 自訓練
-                    val = parse_val_pair_metric(st_dir / f"self_training_val_results_fold{fold}_round{r}.txt", metric)
+                    val = parse_val_metric(
+                        st_dir / f"self_training_val_results_fold{fold}_round{r}.txt",
+                        target=target,
+                        metric=metric,
+                    )
                 # 只收集成功解析的數值
                 if val is not None:
                     fold_vals.append(val) # 第 r round 的 fold_vals list 會有 fold_start..fold_end 的值(缺值則少一個元素)
@@ -616,13 +666,16 @@ def write_text_report(
     labels: list[str],
     num_rounds: int,
     output_path: Path,
+    report_title: str,
 ) -> None:
     """輸出人類可讀的文字摘要"""
     # lines: 最終要寫入 .txt 報告的每一行文字
     lines: list[str] = []
     lines.append("=" * 70)
-    lines.append("驗證集 Pair F1 逐輪分析報告")
+    lines.append(f"{report_title} 逐輪分析報告")
     lines.append("=" * 70)
+
+    report_name = report_title.replace("驗證集 ", "", 1)
 
     rounds_arr = np.arange(0, num_rounds + 1)
 
@@ -655,7 +708,7 @@ def write_text_report(
         mean_arr = safe_nanmean_axis0(matrix) * 100
         best_r = int(np.nanargmax(mean_arr))
         best_label = "Init" if best_r == 0 else f"R{best_r}"
-        lines.append(f"\n  ★ 最佳平均 Pair F1 出現在 {best_label}: {mean_arr[best_r]:.2f}%")
+        lines.append(f"\n  ★ 最佳平均 {report_name} 出現在 {best_label}: {mean_arr[best_r]:.2f}%")
 
     lines.append(f"\n{'=' * 70}")
     output_path.write_text("\n".join(lines), encoding="utf-8")
@@ -668,7 +721,7 @@ def write_text_report(
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="繪製驗證集 Pair F1 隨自訓練輪次變化的曲線圖",
+        description="繪製驗證集 Emotion / Cause / Pair 指標隨自訓練輪次變化的曲線圖",
     )
     p.add_argument(
         "--summary-files",
@@ -711,12 +764,18 @@ def parse_args() -> argparse.Namespace:
         "--metric",
         default="f1",
         choices=["f1", "precision", "recall", "all"],
-        help="要繪製的 Pair 指標: f1 / precision / recall / all (一次畫三張)",
+        help="要繪製的指標: f1 / precision / recall / all (一次畫三張)",
+    )
+    p.add_argument(
+        "--target",
+        default="pair",
+        choices=["emotion", "cause", "pair", "all"],
+        help="要繪製的目標: emotion / cause / pair / all (一次畫三類目標)",
     )
     p.add_argument(
         "--title",
         default=None,
-        help="圖表標題 (預設依 metric 自動產生)",
+        help="圖表標題 (預設依 target + metric 自動產生)",
     )
     p.add_argument(
         "--no-individual-seeds",
@@ -732,17 +791,40 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-METRIC_DISPLAY = {
-    "f1":        {"title": "驗證集 Pair F1",        "ylabel": "驗證集 Pair F1 (%)"},
-    "precision": {"title": "驗證集 Pair Precision",  "ylabel": "驗證集 Pair Precision (%)"},
-    "recall":    {"title": "驗證集 Pair Recall",     "ylabel": "驗證集 Pair Recall (%)"},
-}
+def get_metric_display(target: str, metric: str) -> dict[str, str]:
+    """回傳指定 target + metric 對應的標題資訊。"""
+    target_label = TARGET_LABELS[target]
+    metric_label = METRIC_LABELS[metric]
+    title = f"驗證集 {target_label} {metric_label}"
+    return {
+        "title": title,
+        "report_name": f"{target_label} {metric_label}",
+    }
 
 
-def run_for_metric(args, labels: list[str], root: Path, output_dir: Path, metric: str) -> None:
-    """針對單一 metric 執行收集 + 繪圖 + 報告"""
-    # 依 metric 取對應顯示名稱（title / ylabel)
-    disp = METRIC_DISPLAY[metric]
+def build_output_base_name(output_name: str, target: str, metric: str) -> str:
+    """組合輸出檔名前綴，並保留舊版 pair 命名相容性。"""
+    suffix_parts: list[str] = []
+    if target != "pair":
+        suffix_parts.append(target)
+    if metric != "f1":
+        suffix_parts.append(metric)
+
+    suffix = "" if not suffix_parts else f"_{'_'.join(suffix_parts)}"
+    return f"{output_name}{suffix}"
+
+
+def run_for_metric(
+    args,
+    labels: list[str],
+    root: Path,
+    output_dir: Path,
+    target: str,
+    metric: str,
+) -> None:
+    """針對單一 target + metric 執行收集 + 繪圖 + 報告。"""
+    # 依 target + metric 取對應顯示名稱
+    disp = get_metric_display(target, metric)
     title = args.title if args.title else disp["title"]
 
     # all_groups: 每個 summary 對應一個 group_data
@@ -787,14 +869,20 @@ def run_for_metric(args, labels: list[str], root: Path, output_dir: Path, metric
             fold_start=args.fold_start,
             fold_end=args.fold_end,
             num_rounds=args.rounds,
+            target=target,
             metric=metric,
         )
         all_groups.append(group_data)
 
     # 輸出檔名: 若 metric != f1, 檔名加上 _precision / _recall
-    # 命名規則: f1 不加後綴；precision/recall 會加 _precision/_recall
-    suffix = "" if metric == "f1" else f"_{metric}"
-    base = output_dir / f"{args.output_name}{suffix}"
+    # 命名規則:
+    #   pair + f1        -> output_name
+    #   pair + recall    -> output_name_recall
+    #   emotion + f1     -> output_name_emotion
+    #   cause + f1       -> output_name_cause
+    #   emotion + recall -> output_name_emotion_recall
+    base_name = build_output_base_name(args.output_name, target, metric)
+    base = output_dir / base_name
 
     plot_groups(
         all_groups=all_groups,
@@ -816,6 +904,7 @@ def run_for_metric(args, labels: list[str], root: Path, output_dir: Path, metric
         labels=labels,
         num_rounds=args.rounds,
         output_path=base.with_suffix(".txt"),
+        report_title=title,
     )
 
 
@@ -863,18 +952,24 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(exist_ok=True)
 
-    # ── 依 --metric 決定要跑哪些指標 ─────────────────────
+    # ── 依 --metric / --target 決定要跑哪些輸出 ───────────
     if args.metric == "all":
         metrics_to_run = ["f1", "precision", "recall"]
     else:
         metrics_to_run = [args.metric]
 
-    # 5) 逐個 metric 執行完整流程 (讀取、計算、繪圖、輸出報告)
-    for metric in metrics_to_run:
-        print(f"\n{'='*60}")
-        print(f"  正在處理 metric: {metric}")
-        print(f"{'='*60}")
-        run_for_metric(args, labels, root, output_dir, metric)
+    if args.target == "all":
+        targets_to_run = ["emotion", "cause", "pair"]
+    else:
+        targets_to_run = [args.target]
+
+    # 5) 逐個 target / metric 執行完整流程 (讀取、計算、繪圖、輸出報告)
+    for target in targets_to_run:
+        for metric in metrics_to_run:
+            print(f"\n{'='*60}")
+            print(f"  正在處理 target={target}, metric={metric}")
+            print(f"{'='*60}")
+            run_for_metric(args, labels, root, output_dir, target, metric)
 
 
 if __name__ == "__main__":
